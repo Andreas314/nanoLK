@@ -1,5 +1,6 @@
-#define H_PLANC 1
-#define E_MASS 1
+#define H_PLANC 1.054571817e-34
+#define E_MASS 9.1093837e-31
+#define EV_TO_J 1.60217663e-19
 
 #include <vector>
 #include <cmath>
@@ -7,12 +8,32 @@
 #include <array>
 #include <iostream>
 #include <fstream>
+#include <stdexcept>
+#include <string>
+extern "C" 
+{
+           void zheev_(char* jobz, char* uplo, int* n,
+           std::complex<double>* a, int* lda,
+           double* w,
+           std::complex<double>* work, int* lwork,
+	   double* rwork, int* info);
+}
+extern "C" 
+{
+           void cheev_(char* jobz, char* uplo, int* n,
+           std::complex<float>* a, int* lda,
+           float* w,
+           std::complex<float>* work, int* lwork,
+	   float* rwork, int* info);
+}
 
+
+template <class T>
 class nanoLK
 {
 public:
-	using real = float;
-	using ind = long int;
+	using real = T;
+	using ind = int;
 	using vec = std::array<ind, 2>;
 	nanoLK(ind n_x_, ind n_y_, real l_x_, real l_y_):
 		l_x(l_x_),
@@ -22,35 +43,47 @@ public:
 		{
 			size = n_bands * (2 * n_x  + 1) * (2 * n_y + 1);
 			hamiltonian.resize( ( size * size ));
-			G_x = 2 * M_PI / l_x;
-			G_y = 2 * M_PI / l_y;
+			eigenvalues.resize(size);
+			G_x = 2.0 * M_PI / l_x;
+			G_y = 2.0 * M_PI / l_y;
 		}
 	void assemble(real );
+	void diagonalize();
 
 private:
+	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
 	struct params
 	{
-		real gamma_c = 0 ;
-		real gamma_1 = 0 ;
-		real gamma_2 = 0 ;
-		real gamma_3 = 0;
-		real delta_so = 0 ;
-		real e_g = 0 ;
-		real a = 0 ;
-		real p_0 = 0 ;
-		real s_x = 0 ;
-		real s_y = 0 ;
-		real f_mx = 0 ;
+		real gamma_l_1 = 7.1 ;
+		real gamma_l_2 = 2.01;
+		real gamma_l_3 = 2.91;
+		real m_c = 0.067;
+		real e_p = 28.8*EV_TO_J;
+		real delta_so = 0.34 *EV_TO_J;
+		real e_g = 1.5 *EV_TO_J;
+		real gamma_c =  1.0 / m_c - (e_p / 3.0) *
+		 (2.0 / e_g +  1.0 / (e_g + delta_so));
+		real gamma_1 = gamma_l_1 - 
+			  e_p / (3 * e_g + delta_so);
+		real gamma_2 = gamma_l_2 - 
+			  e_p / (6 * e_g + 2 * delta_so);
+		real gamma_3 = gamma_l_3 - 
+			  e_p / (6 * e_g + 2 * delta_so);
+		real a = 5e-10 ;
+		std::complex<real> p_0 = i_u * static_cast<std::complex<real>>(std::sqrt(e_p) * H_PLANC / 2 / E_MASS);
+		real s_x = 100e-9 ;
+		real s_y = 100e-9 ;
+		real f_mx = 0;
 	};
 
 	const params m_params;
 	
 	constexpr static ind n_bands = 8;
 	constexpr static real pre_fact = (H_PLANC * H_PLANC / 2.0 / E_MASS);
-	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
 	ind n_x, n_y, size;
 	real l_x, l_y, G_x, G_y;
 	std::vector<std::complex<real>> hamiltonian;
+	std::vector<real> eigenvalues;
 	
 	vec get_global_index(ind , ind , vec , vec ) const;
 	std::complex<real> element_right(ind , ind , real , vec , vec ) const;
@@ -70,7 +103,60 @@ private:
 	std::complex<real> element_u(real ) const;
 };
 
-inline void nanoLK::assemble(real k_z)
+template <>
+inline void nanoLK<float>::diagonalize()
+{
+	char flag_eigen = 'V';
+	char flag_triangle = 'L';
+	int info;
+	int lwork = 2 * size;
+	
+	std::vector<std::complex<float>> work;
+	work.resize(lwork);
+	
+	std::vector<float> rwork;
+	rwork.resize(3 * size - 1);
+
+	cheev_(&flag_eigen, &flag_triangle, &size,
+        hamiltonian.data(), &size,
+        eigenvalues.data(),
+        work.data(), &lwork,
+	rwork.data(), &info);
+	
+	if (info != 0)
+		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
+	for (int ii = 0; ii < size; ii++)
+		std::cout << eigenvalues[ii] / EV_TO_J<< std::endl;
+}
+
+
+template <>
+inline void nanoLK<double>::diagonalize()
+{
+	char flag_eigen = 'V';
+	char flag_triangle = 'U';
+	int info;
+	int lwork = 2 * size;
+	
+	std::vector<std::complex<double>> work;
+	work.resize(lwork);
+	
+	std::vector<double> rwork;
+	rwork.resize(3 * size - 1);
+
+	zheev_(&flag_eigen, &flag_triangle, &size,
+        hamiltonian.data(), &size,
+        eigenvalues.data(),
+        work.data(), &lwork,
+	rwork.data(), &info);
+	
+	if (info != 0)
+		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
+}
+
+
+template <class T>
+inline void nanoLK<T>::assemble(real k_z)
 {
 	for (ind k_x = -n_x; k_x <= n_x; k_x++)
 	{
@@ -100,7 +186,8 @@ inline void nanoLK::assemble(real k_z)
 	}
 }
 
-inline nanoLK::vec nanoLK::get_global_index(ind n_b_1, ind n_b_2, vec k, vec q) const
+template <class T>
+inline typename nanoLK<T>::vec nanoLK<T>::get_global_index(ind n_b_1, ind n_b_2, vec k, vec q) const
 {
 	vec index;
 
@@ -116,75 +203,103 @@ inline nanoLK::vec nanoLK::get_global_index(ind n_b_1, ind n_b_2, vec k, vec q) 
 }
 
 
-inline nanoLK::real nanoLK::xi_mx(ind k_x, ind k_y) const
+template <class T>
+inline T nanoLK<T>::xi_mx(ind k_x, ind k_y) const
 {
+	if (k_x != 0 &&  k_y != 0)
 	return 1.0 - 4.0 * std::sin(G_x * k_x * m_params.s_x) 
 			 * std::sin(G_y * k_y * m_params.s_y)
 			 / (G_y * k_y * G_x * k_x);
+	else if (k_y == 0 && k_x != 0)
+	return 1.0 - 4.0 * std::sin(G_x * k_x * m_params.s_x) 
+			 / (G_x * k_x) * m_params.s_y;
+	else if (k_x == 0 && k_y != 0)
+	return 1.0 - 4.0 * std::sin(G_y * k_y * m_params.s_y) 
+			 / (G_y * k_y) * m_params.s_x;
+	else
+		return 1.0 - 4.0 * m_params.s_x * m_params.s_y;
 }
 
-inline std::complex<nanoLK::real> nanoLK::h0(vec k, vec q, std::complex<real> f) const
+template <class T>
+inline std::complex<T> nanoLK<T>::h0(vec k, vec q, std::complex<real> f) const
 {
 	std::complex<real> result;
 	if (k[0] == q[0] && k[1] == q[1])
 		result = f;
-	result += std::pow(2 * M_PI, 3.0f) / l_x / l_y * xi_mx(q[0] - k[0], q[1] - k[1]);
+	result +=  static_cast<std::complex<real>>(std::pow(2 * M_PI, 2.0f)) / l_x / l_y * xi_mx(q[0] - k[0], q[1] - k[1]) * (m_params.f_mx - f);
 	return result;
 }
 
-inline std::complex<nanoLK::real> nanoLK::h1(ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
+template <class T>
+inline std::complex<T> nanoLK<T>::h1(ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
 {
-	return static_cast<std::complex<real>>( 1.0 / 2.0 * (k_i + q_i) ) * h0(k, q, f);
+	real pre = (k[0] == k_i) ? G_x : G_y;
+	return static_cast<std::complex<real>>( 1.0 / 2.0 * pre * (k_i + q_i) ) * h0(k, q, f);
 
 }
 
-inline std::complex<nanoLK::real> nanoLK::h2(ind k_j, ind q_j, ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
+template <class T>
+inline std::complex<T> nanoLK<T>::h2(ind k_j, ind q_j, ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
 {
-	return static_cast<std::complex<real>>( 1.0 / 2.0 * (k_i * q_j + q_j * k_i) ) * h0(k, q, f);
+	real pre_ki = (k[0] == k_i) ? G_x : G_y;
+	real pre_kj = (k[0] == k_j) ? G_x : G_y;
+	real pre_qi = (q[0] == q_i) ? G_x : G_y;
+	real pre_qj = (q[0] == q_j) ? G_x : G_y;
+	return static_cast<std::complex<real>>( 1.0 / 2.0 * (pre_ki * k_i * pre_qj * q_j
+			       	               + pre_qi * q_i * pre_kj * k_j) ) * h0(k, q, f);
 }
 
-inline std::complex<nanoLK::real> nanoLK::element_o(real k_z, vec k, vec q) const
+template <class T>
+inline std::complex<T> nanoLK<T>::element_o(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_c;
 	return f * k_z * k_z + h2(k[0], q[0], k[0], q[0], k, q, f) + h2(k[1], q[1], k[1], q[1], k, q, f);
 }
 
-inline std::complex<nanoLK::real> nanoLK::element_p(real k_z, vec k, vec q) const
+template <class T>
+inline std::complex<T> nanoLK<T>::element_p(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_1;
 	return f * k_z * k_z + h2(k[0], q[0], k[0], q[0], k, q, f) + h2(k[1], q[1], k[1], q[1], k, q, f);
 }
 
-inline std::complex<nanoLK::real> nanoLK::element_q(real k_z, vec k, vec q) const
+template <class T>
+inline std::complex<T> nanoLK<T>::element_q(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_2;
 	return f * static_cast<std::complex<real>>(-2.0) *  k_z * k_z + h2(k[0], q[0], k[0], q[0], k, q, f) + h2(k[1], q[1], k[1], q[1], k, q, f);
 }
 
-inline std::complex<nanoLK::real> nanoLK::element_r(vec k, vec q) const
+template <class T>
+inline std::complex<T> nanoLK<T>::element_r(vec k, vec q) const
 {
 	std::complex<real> f1 = pre_fact * std::sqrt(3) * m_params.gamma_2;
 	std::complex<real> f2 = static_cast<std::complex<real>>(pre_fact * std::sqrt(3) * m_params.gamma_3 * -2.0) * i_u;
 	return h2(k[0], q[0], k[0], q[0], k, q, f1) + h2(k[1], q[1], k[1], q[1], k, q, -f1) + h2(k[0], q[0], k[1], q[1], k, q, f2);
 }
 
-inline std::complex<nanoLK::real> nanoLK::element_s(real k_z, vec k, vec q) const
+template <class T>
+inline std::complex<T> nanoLK<T>::element_s(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * std::sqrt(6) * m_params.gamma_3;
 	return h1(k[0], q[0], k, q, f) * k_z + h1(k[1], q[1], k, q, f * (-i_u)) * k_z;
 }
 
-inline std::complex<nanoLK::real> nanoLK::element_t(vec k, vec q) const
+template <class T>
+inline std::complex<T> nanoLK<T>::element_t(vec k, vec q) const
 {
-	std::complex<real> f = 1.0 / std::sqrt(6) * m_params.p_0;
+	std::complex<real> f = static_cast<std::complex<real>>(1.0 / std::sqrt(6)) * m_params.p_0;
 	return h1(k[0], q[0], k, q, f) + h1(k[1], q[1], k, q, f * i_u);
 }
 
-inline std::complex<nanoLK::real> nanoLK::element_u(real k_z) const
+template <class T>
+inline std::complex<T> nanoLK<T>::element_u(real k_z) const
 {
-	return 1.0 / std::sqrt(3) * m_params.p_0 * k_z;
+	return static_cast<std::complex<real>>(1.0 / std::sqrt(3) * k_z) * m_params.p_0;
 }
-inline std::complex<nanoLK::real> nanoLK::element_right(ind n_1, ind n_2, real k_z, vec k, vec q) const
+
+template <class T>
+inline std::complex<T> nanoLK<T>::element_right(ind n_1, ind n_2, real k_z, vec k, vec q) const
 {
 	auto is_this = [n_1, n_2](ind x, ind y) -> bool 
 		{
