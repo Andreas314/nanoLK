@@ -9,6 +9,8 @@ set(CMAKE_CXX_COMPILER g++)
 # Use modern C++
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(BLAS REQUIRED)
+find_package(LAPACK REQUIRED)
 
 # Add source files
 set(SOURCES
@@ -21,3 +23,4 @@ add_executable(nanoLK ${SOURCES})
 
 # Include headers from src
 target_include_directories(nanoLK PRIVATE src)
+target_link_libraries(nanoLK PRIVATE ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES})
