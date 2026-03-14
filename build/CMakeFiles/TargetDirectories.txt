@@ -1,3 +1,0 @@
-/home/piratmori28/Desktop/Thesis/nanoLK/build/CMakeFiles/nanoLK.dir
-/home/piratmori28/Desktop/Thesis/nanoLK/build/CMakeFiles/edit_cache.dir
-/home/piratmori28/Desktop/Thesis/nanoLK/build/CMakeFiles/rebuild_cache.dir

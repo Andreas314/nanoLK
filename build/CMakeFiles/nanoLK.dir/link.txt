@@ -1,1 +1,0 @@
-g++ CMakeFiles/nanoLK.dir/src/main.cpp.o CMakeFiles/nanoLK.dir/src/nanoLK.cpp.o -o nanoLK 
