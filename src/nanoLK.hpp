@@ -10,6 +10,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <iomanip>
 extern "C" 
 {
            void zheev_(char* jobz, char* uplo, int* n,
@@ -70,14 +71,13 @@ private:
 		real gamma_3 = gamma_l_3 - 
 			  e_p / (6 * e_g + 2 * delta_so);
 		real a = 5e-10 ;
-		std::complex<real> p_0 = i_u * static_cast<std::complex<real>>(std::sqrt(e_p) * H_PLANC / 2 / E_MASS);
-		real s_x = 50e-9 ;
-		real s_y = 100e-9 ;
+		std::complex<real> p_0 = -i_u * static_cast<std::complex<real>>(std::sqrt(e_p / 2 / E_MASS) * H_PLANC);
+		real s_x = 45e-9 ;
+		real s_y = 40e-9 ;
 		real f_mx = 0;
 	};
 
 	const params m_params;
-	
 	constexpr static ind n_bands = 8;
 	constexpr static real pre_fact = (H_PLANC * H_PLANC / 2.0 / E_MASS);
 	ind n_x, n_y, size;
@@ -109,7 +109,7 @@ inline void nanoLK<float>::diagonalize()
 	char flag_eigen = 'V';
 	char flag_triangle = 'L';
 	int info;
-	int lwork = 2 * size;
+	int lwork = 3 * size;
 	
 	std::vector<std::complex<float>> work;
 	work.resize(lwork);
@@ -126,7 +126,7 @@ inline void nanoLK<float>::diagonalize()
 	if (info != 0)
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
 	for (int ii = 0; ii < size; ii++)
-		std::cout << eigenvalues[ii] / EV_TO_J<< std::endl;
+		std::cout << eigenvalues[ii] << std::endl;
 }
 
 
@@ -134,7 +134,7 @@ template <>
 inline void nanoLK<double>::diagonalize()
 {
 	char flag_eigen = 'V';
-	char flag_triangle = 'U';
+	char flag_triangle = 'L';
 	int info;
 	int lwork = 2 * size;
 	
@@ -152,6 +152,8 @@ inline void nanoLK<double>::diagonalize()
 	
 	if (info != 0)
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
+	for (int ii = 0; ii < size; ii++)
+		std::cout << eigenvalues[ii] / EV_TO_J<< std::endl;
 }
 
 
@@ -173,10 +175,10 @@ inline void nanoLK<T>::assemble(real k_z)
 						for (ind n_b_2 = 0; n_b_2 < n_bands; n_b_2++)
 						{
 							vec index_2d = get_global_index(n_b_1, n_b_2, k, q);
-							if (index_2d[0] < index_2d[1])
-								continue;
+							//if (index_2d[0] < index_2d[1])
+							//	continue;
 							ind index_1d = index_2d[0] * size + index_2d[1];
-							hamiltonian[index_1d] = element_right(n_b_1, n_b_2, k_z, k, q);
+							hamiltonian[index_1d] = element_right(n_b_1, n_b_2, k_z, k, q) / static_cast<real>(EV_TO_J);
 						}
 
 					}
@@ -184,21 +186,21 @@ inline void nanoLK<T>::assemble(real k_z)
 			}
 		}
 	}
-}
 
+}
 template <class T>
 inline typename nanoLK<T>::vec nanoLK<T>::get_global_index(ind n_b_1, ind n_b_2, vec k, vec q) const
 {
 	vec index;
 
-	index[0] = n_b_1 * (2 * n_x + 1) * (2 * n_y + 1);
-	index[0] += (k[1] + n_y) * (2 * n_x + 1);
-	index[0] += (k[0] + n_x);
+	
+	index[0] = (k[1] + n_y) * (2 * n_x + 1) * n_bands;
+	index[0] += (k[0] + n_x) * n_bands;
+	index[0] += n_b_1;
 
-	index[1] = n_b_2 * (2 * n_x + 1) * (2 * n_y + 1);
-	index[1] += (q[1] + n_y) * (2 * n_x + 1);
-	index[1] += (q[0] + n_x);
-
+	index[1] = (q[1] + n_y) * (2 * n_x + 1) * n_bands;
+	index[1] += (q[0] + n_x) * n_bands;
+	index[1] += n_b_2;
 	return index;
 }
 
@@ -217,7 +219,8 @@ inline T nanoLK<T>::xi_mx(ind k_x, ind k_y) const
 	return  - 4.0 * std::sin(G_y * k_y * m_params.s_y) 
 			 / (G_y * k_y) * m_params.s_x;
 	else
-		return (2 * M_PI) * (2 * M_PI) - 4.0 * m_params.s_x * m_params.s_y;
+		return ((2 * M_PI)*(2 * M_PI) * 5  - 4.0) * m_params.s_x * m_params.s_y;
+		//return - 4.0 * m_params.s_x * m_params.s_y;
 }
 
 template <class T>
@@ -233,15 +236,20 @@ inline std::complex<T> nanoLK<T>::h0(vec k, vec q, std::complex<real> f) const
 template <class T>
 inline std::complex<T> nanoLK<T>::h1(ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
 {
-	return static_cast<std::complex<real>>( 1.0 / 2.0 * (k_i + q_i) ) * h0(k, q, f);
+	real pre = (k_i == k[0]) ? G_x : G_y;
+	return static_cast<std::complex<real>>( pre * 1.0 / 2.0 * (k_i + q_i) ) * h0(k, q, f);
 
 }
 
 template <class T>
 inline std::complex<T> nanoLK<T>::h2(ind k_j, ind q_j, ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
 {
-	return static_cast<std::complex<real>>( 1.0 / 2.0 * (k_i * q_j
-			       	               + q_i * k_j) ) * h0(k, q, f);
+	real pre_k_i = (k_i == k[0]) ? G_x : G_y;
+	real pre_k_j = (k_j == k[0]) ? G_x : G_y;
+	real pre_q_i = (q_i == q[0]) ? G_x : G_y;
+	real pre_q_j = (q_j == q[0]) ? G_x : G_y;
+	return static_cast<std::complex<real>>( 1.0 / 2.0 * (pre_k_i * pre_q_j * k_i * q_j
+			       	               +pre_k_j * pre_q_i * q_i * k_j) ) * h0(k, q, f);
 }
 
 template <class T>
