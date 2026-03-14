@@ -71,7 +71,7 @@ private:
 			  e_p / (6 * e_g + 2 * delta_so);
 		real a = 5e-10 ;
 		std::complex<real> p_0 = i_u * static_cast<std::complex<real>>(std::sqrt(e_p) * H_PLANC / 2 / E_MASS);
-		real s_x = 100e-9 ;
+		real s_x = 50e-9 ;
 		real s_y = 100e-9 ;
 		real f_mx = 0;
 	};
@@ -207,17 +207,17 @@ template <class T>
 inline T nanoLK<T>::xi_mx(ind k_x, ind k_y) const
 {
 	if (k_x != 0 &&  k_y != 0)
-	return 1.0 - 4.0 * std::sin(G_x * k_x * m_params.s_x) 
+	return - 4.0 * std::sin(G_x * k_x * m_params.s_x) 
 			 * std::sin(G_y * k_y * m_params.s_y)
 			 / (G_y * k_y * G_x * k_x);
 	else if (k_y == 0 && k_x != 0)
-	return 1.0 - 4.0 * std::sin(G_x * k_x * m_params.s_x) 
+	return  - 4.0 * std::sin(G_x * k_x * m_params.s_x) 
 			 / (G_x * k_x) * m_params.s_y;
 	else if (k_x == 0 && k_y != 0)
-	return 1.0 - 4.0 * std::sin(G_y * k_y * m_params.s_y) 
+	return  - 4.0 * std::sin(G_y * k_y * m_params.s_y) 
 			 / (G_y * k_y) * m_params.s_x;
 	else
-		return 1.0 - 4.0 * m_params.s_x * m_params.s_y;
+		return (2 * M_PI) * (2 * M_PI) - 4.0 * m_params.s_x * m_params.s_y;
 }
 
 template <class T>
@@ -233,20 +233,15 @@ inline std::complex<T> nanoLK<T>::h0(vec k, vec q, std::complex<real> f) const
 template <class T>
 inline std::complex<T> nanoLK<T>::h1(ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
 {
-	real pre = (k[0] == k_i) ? G_x : G_y;
-	return static_cast<std::complex<real>>( 1.0 / 2.0 * pre * (k_i + q_i) ) * h0(k, q, f);
+	return static_cast<std::complex<real>>( 1.0 / 2.0 * (k_i + q_i) ) * h0(k, q, f);
 
 }
 
 template <class T>
 inline std::complex<T> nanoLK<T>::h2(ind k_j, ind q_j, ind k_i, ind q_i, vec k, vec q, std::complex<real> f) const
 {
-	real pre_ki = (k[0] == k_i) ? G_x : G_y;
-	real pre_kj = (k[0] == k_j) ? G_x : G_y;
-	real pre_qi = (q[0] == q_i) ? G_x : G_y;
-	real pre_qj = (q[0] == q_j) ? G_x : G_y;
-	return static_cast<std::complex<real>>( 1.0 / 2.0 * (pre_ki * k_i * pre_qj * q_j
-			       	               + pre_qi * q_i * pre_kj * k_j) ) * h0(k, q, f);
+	return static_cast<std::complex<real>>( 1.0 / 2.0 * (k_i * q_j
+			       	               + q_i * k_j) ) * h0(k, q, f);
 }
 
 template <class T>
