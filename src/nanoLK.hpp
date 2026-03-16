@@ -36,11 +36,12 @@ public:
 	using real = T;
 	using ind = int;
 	using vec = std::array<ind, 2>;
-	nanoLK(ind n_x_, ind n_y_, real l_x_, real l_y_):
+	nanoLK(ind n_x_, ind n_y_, real l_x_, real l_y_, real filling_bound_):
 		l_x(l_x_),
 		l_y(l_y_),
 		n_x(n_x_),
-		n_y(n_y_)
+		n_y(n_y_),
+		filling_bound(filling_bound_)
 		{
 			size = n_bands * (2 * n_x  + 1) * (2 * n_y + 1);
 			hamiltonian.resize( ( size * size ));
@@ -87,6 +88,8 @@ private:
 	std::vector<real> eigenvalues;
 	
 	real integrate_state(int );
+	int last_index = 0;
+	real filling_bound;
 
 	vec get_global_index(ind , ind , vec , vec ) const;
 	std::complex<real> element_right(ind , ind , real , vec , vec ) const;
@@ -149,54 +152,44 @@ template<class T>
 void nanoLK<T>::write_function(real dx, real dy, int lim)
 {
 	std::ofstream output;
-	output.open("Spinor.txt");
-	int lim_dumm = lim;
+	output.open("Spinor_"+std::to_string(lim)+".txt");
 	int num = 0;
 	for (int ii = 0; ii < size; ii++){
-		if (eigenvalues[ii] > 0 && eigenvalues[ii+1] > 5)
+		if (eigenvalues[ii] / EV_TO_J > 0 && eigenvalues[ii+1] / EV_TO_J  > 10)
 		{
-			if (lim_dumm == 0)
-			{
 				num = ii;
 				break;
-			}
-			lim_dumm--;
 		}
 	}
+
+	real integral_glob;
+	{
+		int ii = last_index;
+		while(true)
+		{
+			integral_glob = integrate_state(num-ii);
+			if (integral_glob > filling_bound)
+				break;
+			ii++;
+		}
+	lim = ii;
+	last_index = ii + 1;
+	}
+
 	std::vector<std::complex<real>> coeffs;
 	coeffs.resize(size);
+	std::array<std::complex<real>, n_bands> spinor;
 	output << "x y psi\n";
 	for (int ii = 0; ii < size; ii++)
 	{
-		coeffs[ii] = hamiltonian[(num - 5) * size + ii];
+		coeffs[ii] = hamiltonian[(num - lim) * size + ii];
 
 	}
-	real integral_glob = 0;
-	std::array<std::complex<real>, n_bands> spinor;
-	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
-	{
-		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
-		{
-			for (int n = 0; n < n_bands; n++)
-			{
-				spinor[n] = 0;
-				for (int k_x = -n_x; k_x <= n_x; k_x++)
-				{
-					for (int k_y = -n_y; k_y <= n_y; k_y++)
-					{
-						int index = (k_y + n_y) * (2 * n_x + 1) * n_bands;
-						index += (k_x + n_x) * n_bands;
-						index += n;
-						spinor[n] += coeffs[index] * exp(i_u * static_cast<real>(G_x * k_x * x))*exp(i_u * static_cast<real>(G_y * k_y * y));
-						integral_glob += (spinor[n] * std::conj(spinor[n])).real() *  static_cast<real>(dx * dy); 
-					}
-				}
-			}
-		}
-	}for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
+	for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
 	{
 		for (float y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
 		{
+			real to_plot=0;
 			for (int n = 0; n < n_bands; n++)
 			{
 				spinor[n] = 0;
@@ -210,8 +203,9 @@ void nanoLK<T>::write_function(real dx, real dy, int lim)
 						spinor[n] += coeffs[index] * exp(i_u * static_cast<real>(G_x * k_x * x))*exp(i_u * static_cast<real>(G_y * k_y * y));
 					}
 				}
+				to_plot +=std::abs(spinor[n]* std::conj(spinor[n])) / (integral_glob) / integral_glob;
 			}
-			output << x << " " << y << " " << std::sqrt(std::abs(spinor[4]* std::conj(spinor[4])) / (integral_glob) / 1e9)<< "\n";
+			output << x << " " << y << " " << std::sqrt(to_plot)<< "\n";
 		}
 	}
 }
@@ -267,8 +261,9 @@ inline void nanoLK<double>::diagonalize()
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
 	for (int ii = 0; ii < size; ii++)
 	{
-		if (eigenvalues[ii]/ static_cast<real>(EV_TO_J)  < 10 && eigenvalues[ii]/ static_cast<real>(EV_TO_J)  > -10)
-			std::cout << eigenvalues[ii] / static_cast<real>(EV_TO_J) <<" " << integrate_state(ii) << std::endl;
+		real weight = integrate_state(ii);
+		if (eigenvalues[ii]/ static_cast<real>(EV_TO_J)  < 10 && eigenvalues[ii]/ static_cast<real>(EV_TO_J)  > -10 && weight > filling_bound)
+			std::cout << eigenvalues[ii] / static_cast<real>(EV_TO_J) <<" " << weight << std::endl;
 	}
 }
 
