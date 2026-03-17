@@ -36,25 +36,26 @@ public:
 	using real = T;
 	using ind = int;
 	using vec = std::array<ind, 2>;
-	nanoLK(ind n_x_, ind n_y_, real l_x_, real l_y_, real filling_bound_):
+	nanoLK(ind n_x_, ind n_y_, real l_x_, real l_y_):
 		l_x(l_x_),
 		l_y(l_y_),
 		n_x(n_x_),
-		n_y(n_y_),
-		filling_bound(filling_bound_)
+		n_y(n_y_)
 		{
 			size = n_bands * (2 * n_x  + 1) * (2 * n_y + 1);
 			hamiltonian.resize( ( size * size ));
 			eigenvalues.resize(size);
+			norms.resize(size);
 			G_x = 2.0 * M_PI / l_x;
 			G_y = 2.0 * M_PI / l_y;
-		}
+		};
 	void assemble(real );
 	void diagonalize();
-	void write_function(real, real, int);
+	void write_functions(real, real, int);
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
+	real E_max = 10, E_min = -5, localization = 0.85;
 	struct params
 	{
 		real gamma_l_1 = 7.1 ;
@@ -88,8 +89,11 @@ private:
 	std::vector<real> eigenvalues;
 	
 	real integrate_state(int );
+	std::complex<real> get_value_at_point(int , int , real , real , real);
+	std::complex<real> get_derivative_at_point(int , int , int , real , real , real);
+	real k_z;
+	std::vector<real> norms;
 	int last_index = 0;
-	real filling_bound;
 
 	vec get_global_index(ind , ind , vec , vec ) const;
 	std::complex<real> element_right(ind , ind , real , vec , vec ) const;
@@ -110,37 +114,78 @@ private:
 };
 
 template<class T>
-T nanoLK<T>::integrate_state(int n)
+std::complex<T> nanoLK<T>::get_derivative_at_point(int state, int band, int direction, real x, real y, real z)
 {
+
+	std::complex<real> value = 0;
 	std::vector<std::complex<real>> coeffs;
 	coeffs.resize(size);
 	for (int ii = 0; ii < size; ii++)
 	{
-		coeffs[ii] = hamiltonian[n * size + ii];
-	
+		coeffs[ii] = hamiltonian[state * size + ii];	
 	}
+	for (int k_x = -n_x; k_x <= n_x; k_x++)
+	{
+		for (int k_y = -n_y; k_y <= n_y; k_y++)
+		{
+			std::complex<real> factor;
+			if (direction == 0)
+				factor = i_u * static_cast<real>(k_x * G_x);
+			else if (direction == 1)
+				factor = i_u * static_cast<real>(k_y * G_y);
+			else if (direction == 2)
+				factor = i_u * static_cast<real>(k_z);
+			else
+				throw std::runtime_error("Only three directions in space!");
+			int index = (k_y + n_y) * (2 * n_x + 1) * n_bands;
+			index += (k_x + n_x) * n_bands;
+			index += band;
+			value += factor * coeffs[index] * exp(i_u * static_cast<real>(G_x * k_x * x))*exp(i_u * static_cast<real>(G_y * k_y * y)) ;
+		}
+	}
+	value *= static_cast<std::complex<real>>(exp(i_u * k_z * z));
+	return value;
+}
+
+template<class T>
+std::complex<T> nanoLK<T>::get_value_at_point(int state, int band, real x, real y, real z)
+{
+	std::complex<real> value = 0;
+	std::vector<std::complex<real>> coeffs;
+	coeffs.resize(size);
+	for (int ii = 0; ii < size; ii++)
+	{
+		coeffs[ii] = hamiltonian[state * size + ii];	
+	}
+	for (int k_x = -n_x; k_x <= n_x; k_x++)
+	{
+		for (int k_y = -n_y; k_y <= n_y; k_y++)
+		{
+			int index = (k_y + n_y) * (2 * n_x + 1) * n_bands;
+			index += (k_x + n_x) * n_bands;
+			index += band;
+			value += coeffs[index] * exp(i_u * static_cast<real>(G_x * k_x * x))*exp(i_u * static_cast<real>(G_y * k_y * y)) ;
+		}
+	}
+	value *= static_cast<std::complex<real>>(exp(i_u * k_z * z));
+	return value;
+}
+
+
+template<class T>
+T nanoLK<T>::integrate_state(int state)
+{
 	real integral = 0;
-	std::array<std::complex<real>, n_bands> spinor;
 	real dx = m_params.s_x / 20;
 	real dy = m_params.s_y / 20;
 	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
 	{
 		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
 		{
-			for (int n = 0; n < n_bands; n++)
+			for (int band = 0; band < n_bands; band++)
 			{
-				spinor[n] = 0;
-				for (int k_x = -n_x; k_x <= n_x; k_x++)
-				{
-					for (int k_y = -n_y; k_y <= n_y; k_y++)
-					{
-						int index = (k_y + n_y) * (2 * n_x + 1) * n_bands;
-						index += (k_x + n_x) * n_bands;
-						index += n;
-						spinor[n] += coeffs[index] * exp(i_u * static_cast<real>(G_x * k_x * x))*exp(i_u * static_cast<real>(G_y * k_y * y));
-					}
-				}
-				integral += (spinor[n] * std::conj(spinor[n])).real() *  static_cast<real>(dx * dy); 
+				std::complex<real> at_point = get_value_at_point(state, band, x, y, 0);
+				integral += (at_point * std::conj(at_point)).real() *  static_cast<real>(dx * dy); 
 			}
 		}
 	}
@@ -149,63 +194,60 @@ T nanoLK<T>::integrate_state(int n)
 }
 
 template<class T>
-void nanoLK<T>::write_function(real dx, real dy, int lim)
+void nanoLK<T>::write_functions(real dx, real dy, int max)
 {
-	std::ofstream output;
-	output.open("Spinor_"+std::to_string(lim)+".txt");
-	int num = 0;
-	for (int ii = 0; ii < size; ii++){
-		if (eigenvalues[ii] / EV_TO_J > 0 && eigenvalues[ii+1] / EV_TO_J  > 10)
-		{
-				num = ii;
-				break;
-		}
-	}
-
-	real integral_glob;
+	std::ofstream output_eigs;
+	output_eigs.open("Eigenvalues.txt");
+	for (int lim = 0; lim < max; lim++)
 	{
-		int ii = last_index;
-		while(true)
-		{
-			integral_glob = integrate_state(num-ii);
-			if (integral_glob > filling_bound)
-				break;
-			ii++;
-		}
-	lim = ii;
-	last_index = ii + 1;
-	}
-
-	std::vector<std::complex<real>> coeffs;
-	coeffs.resize(size);
-	std::array<std::complex<real>, n_bands> spinor;
-	output << "x y psi\n";
-	for (int ii = 0; ii < size; ii++)
-	{
-		coeffs[ii] = hamiltonian[(num - lim) * size + ii];
-
-	}
-	for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
-	{
-		for (float y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
-		{
-			real to_plot=0;
-			for (int n = 0; n < n_bands; n++)
+		std::ofstream output;
+		output.open("Function_"+std::to_string(lim)+".txt");
+		int num = 0;
+		for (int ii = 0; ii < size; ii++){
+			if (eigenvalues[ii] / EV_TO_J > 0 && eigenvalues[ii+1] / EV_TO_J  > E_max)
 			{
-				spinor[n] = 0;
-				for (int k_x = -n_x; k_x <= n_x; k_x++)
-				{
-					for (int k_y = -n_y; k_y <= n_y; k_y++)
-					{
-						int index = (k_y + n_y) * (2 * n_x + 1) * n_bands;
-						index += (k_x + n_x) * n_bands;
-						index += n;
-						spinor[n] += coeffs[index] * exp(i_u * static_cast<real>(G_x * k_x * x))*exp(i_u * static_cast<real>(G_y * k_y * y));
-					}
-				}
-				to_plot +=std::abs(spinor[n]* std::conj(spinor[n])) / (integral_glob) / integral_glob;
+					num = ii;
+					break;
 			}
-			output << x << " " << y << " " << std::sqrt(to_plot)<< "\n";
+		}
+	
+		real integral_glob;
+		int lim_new;
+		{
+			int ii = last_index;
+			while(true)
+			{
+				integral_glob = norms[num-ii];
+				if (integral_glob > localization)
+					break;
+				ii++;
+			}
+			lim_new = ii;
+			last_index = ii + 1;
+		}
+		std::cout << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
+		output_eigs << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
+		std::vector<std::complex<real>> coeffs;
+		coeffs.resize(size);
+		std::array<std::complex<real>, n_bands> spinor;
+		output << "x y psi\n";
+		for (int ii = 0; ii < size; ii++)
+		{
+			coeffs[ii] = hamiltonian[(num - lim_new) * size + ii];
+	
+		}
+		for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
+		{
+			for (float y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
+			{
+				real to_plot=0;
+				for (int n = 0; n < n_bands; n++)
+				{
+					std::complex<real> value = get_value_at_point(num - lim_new, n, x, y, 0);
+					to_plot +=std::abs(value* value) / (integral_glob) / integral_glob;
+				}
+				output << x << " " << y << " " << std::sqrt(to_plot)<< "\n";
+			}
 		}
 	}
 }
@@ -261,16 +303,15 @@ inline void nanoLK<double>::diagonalize()
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
 	for (int ii = 0; ii < size; ii++)
 	{
-		real weight = integrate_state(ii);
-		if (eigenvalues[ii]/ static_cast<real>(EV_TO_J)  < 10 && eigenvalues[ii]/ static_cast<real>(EV_TO_J)  > -10 && weight > filling_bound)
-			std::cout << eigenvalues[ii] / static_cast<real>(EV_TO_J) <<" " << weight << std::endl;
+		norms[ii] = integrate_state(ii);
 	}
 }
 
 
 template <class T>
-inline void nanoLK<T>::assemble(real k_z)
+inline void nanoLK<T>::assemble(real k_z_)
 {
+	k_z = k_z_;
 	for (ind k_x = -n_x; k_x <= n_x; k_x++)
 	{
 		for (ind k_y = -n_y; k_y <= n_y; k_y++)
