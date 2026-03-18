@@ -56,11 +56,12 @@ public:
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
 	real E_max = 10, E_min = -5, localization = 0.85;
+	int res_x = 20, res_y = 20;
 	struct params
 	{
-		real gamma_l_1 = 7.1 ;
-		real gamma_l_2 = 2.01;
-		real gamma_l_3 = 2.91;
+		real gamma_l_1 = 6.98 ;
+		real gamma_l_2 = 2;
+		real gamma_l_3 = 2.9;
 		real m_c = 0.067;
 		real e_p = 28.8*EV_TO_J;
 		real delta_so = 0.34 *EV_TO_J;
@@ -73,8 +74,8 @@ private:
 			  e_p / (6 * e_g + 2 * delta_so);
 		real gamma_3 = gamma_l_3 - 
 			  e_p / (6 * e_g + 2 * delta_so);
-		real a = 5e-10 ;
-		std::complex<real> p_0 = -i_u * static_cast<std::complex<real>>(std::sqrt(e_p / 2 / E_MASS) * H_PLANC);
+		real a = 5.65e-10 ;
+		std::complex<real> p_0 =  - i_u * static_cast<std::complex<real>>(std::sqrt(e_p / 2 / E_MASS) * H_PLANC);
 		real s_x = 10e-9 ;
 		real s_y = 10e-9 ;
 		real f_mx = 100 * EV_TO_J;
@@ -110,7 +111,7 @@ private:
 	std::complex<real> element_r(vec , vec ) const;
 	std::complex<real> element_s(real , vec , vec ) const;
 	std::complex<real> element_t(vec , vec ) const;
-	std::complex<real> element_u(real ) const;
+	std::complex<real> element_u(real , vec , vec) const;
 };
 
 template<class T>
@@ -176,8 +177,8 @@ template<class T>
 T nanoLK<T>::integrate_state(int state)
 {
 	real integral = 0;
-	real dx = m_params.s_x / 20;
-	real dy = m_params.s_y / 20;
+	real dx = m_params.s_x / res_x;
+	real dy = m_params.s_y / res_y;
 	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
 	{
 		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
@@ -204,9 +205,9 @@ void nanoLK<T>::write_functions(real dx, real dy, int max, int up)
 		output.open("Function_"+std::to_string(lim)+".txt");
 		int num = 0;
 		for (int ii = 0; ii < size; ii++){
-			if (eigenvalues[ii] / EV_TO_J > 0)
+			if (eigenvalues[ii] / EV_TO_J > 0 && eigenvalues[ii + 1] / EV_TO_J > E_max)
 			{
-					num = ii + up;
+					num = ii;
 					break;
 			}
 		}
@@ -311,7 +312,7 @@ inline void nanoLK<double>::diagonalize()
 template <class T>
 inline void nanoLK<T>::assemble(real k_z_)
 {
-	k_z = k_z_;
+	k_z = k_z_ *  M_PI / m_params.a;
 	for (ind k_x = -n_x; k_x <= n_x; k_x++)
 	{
 		for (ind k_y = -n_y; k_y <= n_y; k_y++)
@@ -405,21 +406,21 @@ template <class T>
 inline std::complex<T> nanoLK<T>::element_o(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_c;
-	return f * k_z * k_z + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1 ,1, k, q, f, 1);
+	return f * k_z * (k_z* (k[0] == q[0] && k[1] == q[1])) + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1 ,1, k, q, f, 1);
 }
 
 template <class T>
 inline std::complex<T> nanoLK<T>::element_p(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_1;
-	return f * k_z * k_z + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1, 1, k, q, f, 1);
+	return f * k_z * (k_z*(k[0] == q[0] && k[1] == q[1])) + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1, 1, k, q, f, 1);
 }
 
 template <class T>
 inline std::complex<T> nanoLK<T>::element_q(real k_z, vec k, vec q, int weight) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_2;
-	return f * static_cast<std::complex<real>>(-2.0) *  k_z * k_z + h2(0, 0, 0, 0, k, q, f, weight) + h2(1, 1, 1, 1, k, q, f, weight);
+	return f * static_cast<std::complex<real>>(-2.0) *  k_z * (k_z* (k[0] == q[0] && k[1] == q[1]))  + h2(0, 0, 0, 0, k, q, f, weight) + h2(1, 1, 1, 1, k, q, f, weight);
 }
 
 template <class T>
@@ -434,7 +435,7 @@ template <class T>
 inline std::complex<T> nanoLK<T>::element_s(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * std::sqrt(6) * m_params.gamma_3;
-	return h1(0, 0, k, q, f, 0) * k_z + h1(1, 1, k, q, f * (-i_u), 0) * k_z;
+	return h1(0, 0, k, q, f * k_z, 0 ) + h1(1, 1, k, q, f * (-i_u) * k_z, 0);
 }
 
 template <class T>
@@ -445,9 +446,9 @@ inline std::complex<T> nanoLK<T>::element_t(vec k, vec q) const
 }
 
 template <class T>
-inline std::complex<T> nanoLK<T>::element_u(real k_z) const
+inline std::complex<T> nanoLK<T>::element_u(real k_z, vec k, vec q) const
 {
-	return static_cast<std::complex<real>>(1.0 / std::sqrt(3) * k_z) * m_params.p_0;
+	return static_cast<std::complex<real>>(1.0 / std::sqrt(3))  * m_params.p_0 * ( k_z * (k[0] == q[0] && k[1] == q[1]));
 }
 
 template <class T>
@@ -493,11 +494,11 @@ inline std::complex<T> nanoLK<T>::element_right(ind n_1, ind n_2, real k_z, vec 
 	if (is_this(3, 4))
 		return static_cast<real>(std::sqrt(2)) * element_t(k, q);
 	//without prefactor
-	if (is_this(6, 0))
+	if (is_this(0, 6))
 		return -std::conj(element_t(k, q));
 	if (is_this(4, 2))
 		return std::conj(element_t(k, q));
-	if (is_this(0, 6))
+	if (is_this(6, 0))
 		return -element_t(k, q);
 	if (is_this(2, 4))
 		return element_t(k, q);
@@ -505,34 +506,34 @@ inline std::complex<T> nanoLK<T>::element_right(ind n_1, ind n_2, real k_z, vec 
 	//eleemnts with U
 	//with sqrt(2) prefactor
 	if (is_this(0, 2) || is_this(6, 4))
-		return static_cast<real>(std::sqrt(2)) * element_u(k_z);
+		return static_cast<real>(std::sqrt(2)) * element_u(k_z, k, q);
 	if (is_this(2, 0) || is_this(4, 6))
-		return static_cast<real>(std::sqrt(2)) * std::conj(element_u(k_z));
+		return static_cast<real>(std::sqrt(2)) * std::conj(element_u(k_z, k, q));
 	//with no prefactor
 	if (is_this(0, 3) || is_this(7, 4))
-		return -element_u(k_z);
+		return -element_u(k_z, k, q);
 	if (is_this(3, 0) || is_this(4, 7))
-		return -std::conj(element_u(k_z));
+		return -std::conj(element_u(k_z, k, q));
 
 	//elements with S
 	//with sqrt(3)
-	if (is_this(2, 7))
-		return static_cast<real>(std::sqrt(3)) * element_s(k_z, k, q);
-	if (is_this(3, 6))
-		return static_cast<real>(-std::sqrt(3)) * element_s(k_z, k, q);
 	if (is_this(7, 2))
-		return static_cast<real>(std::sqrt(3)) * std::conj(element_s(k_z, k, q));
+		return static_cast<real>(std::sqrt(3)) * element_s(k_z, k, q);
 	if (is_this(6, 3))
+		return static_cast<real>(-std::sqrt(3)) * element_s(k_z, k, q);
+	if (is_this(2, 7))
+		return static_cast<real>(std::sqrt(3)) * std::conj(element_s(k_z, k, q));
+	if (is_this(3, 6))
 		return static_cast<real>(-std::sqrt(3)) * std::conj(element_s(k_z, k, q));
 	//with sqrt(2)
-	if (is_this(1, 2) || is_this(6, 5))
-		return static_cast<real>(std::sqrt(2)) * element_s(k_z, k, q);
 	if (is_this(2, 1) || is_this(5, 6))
+		return static_cast<real>(std::sqrt(2)) * element_s(k_z, k, q);
+	if (is_this(1, 2) || is_this(6, 5))
 		return static_cast<real>(std::sqrt(2)) * std::conj(element_s(k_z, k, q));
 	//with no prefactor
-	if (is_this(1, 3) || is_this(7, 5))
-		return  -element_s(k_z, k, q);
 	if (is_this(3, 1) || is_this(5, 7))
+		return  -element_s(k_z, k, q);
+	if (is_this(1, 3) || is_this(7, 5))
 		return  -std::conj(element_s(k_z, k, q));
 	
 	//elements with R
