@@ -51,7 +51,7 @@ public:
 		};
 	void assemble(real );
 	void diagonalize();
-	void write_functions(real, real, int);
+	void write_functions(real, real, int , int );
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
@@ -194,7 +194,7 @@ T nanoLK<T>::integrate_state(int state)
 }
 
 template<class T>
-void nanoLK<T>::write_functions(real dx, real dy, int max)
+void nanoLK<T>::write_functions(real dx, real dy, int max, int up)
 {
 	std::ofstream output_eigs;
 	output_eigs.open("Eigenvalues.txt");
@@ -204,9 +204,9 @@ void nanoLK<T>::write_functions(real dx, real dy, int max)
 		output.open("Function_"+std::to_string(lim)+".txt");
 		int num = 0;
 		for (int ii = 0; ii < size; ii++){
-			if (eigenvalues[ii] / EV_TO_J > 0 && eigenvalues[ii+1] / EV_TO_J  > E_max)
+			if (eigenvalues[ii] / EV_TO_J > 0)
 			{
-					num = ii;
+					num = ii + up;
 					break;
 			}
 		}
@@ -225,8 +225,8 @@ void nanoLK<T>::write_functions(real dx, real dy, int max)
 			lim_new = ii;
 			last_index = ii + 1;
 		}
-		std::cout << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
-		output_eigs << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
+		std::cout << lim  << " " << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
+		output_eigs  << lim << " "  << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
 		std::vector<std::complex<real>> coeffs;
 		coeffs.resize(size);
 		std::array<std::complex<real>, n_bands> spinor;
