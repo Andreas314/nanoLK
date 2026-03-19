@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <string>
 #include <iomanip>
+#include <algorithm>
+
 extern "C" 
 {
            void zheev_(char* jobz, char* uplo, int* n,
@@ -52,6 +54,7 @@ public:
 	void assemble(real );
 	void diagonalize();
 	void write_functions(real, real, int , int );
+	std::vector<ind> get_indices(){return valid_indices;}
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
@@ -88,8 +91,10 @@ private:
 	real l_x, l_y, G_x, G_y;
 	std::vector<std::complex<real>> hamiltonian;
 	std::vector<real> eigenvalues;
+	std::vector<int> valid_indices;
 	
 	real integrate_state(int );
+	void get_valid_indices();
 	std::complex<real> get_value_at_point(int , int , real , real , real);
 	std::complex<real> get_derivative_at_point(int , int , int , real , real , real);
 	real k_z;
@@ -193,48 +198,40 @@ T nanoLK<T>::integrate_state(int state)
 	return std::sqrt(integral / l_x / l_y);
 
 }
+template<class T>
+void nanoLK<T>::get_valid_indices()
+{
+	for (ind ii = 0; ii < size; ii++)
+	{
+		if (eigenvalues[ii] / EV_TO_J < E_max && eigenvalues[ii] / EV_TO_J > E_min && norms[ii] > localization)
+			valid_indices.push_back(ii);
+	}
+	std::reverse(valid_indices.begin(), valid_indices.end());
+
+}
 
 template<class T>
 void nanoLK<T>::write_functions(real dx, real dy, int max, int up)
 {
 	std::ofstream output_eigs;
 	output_eigs.open("Eigenvalues.txt");
-	for (int lim = 0; lim < max; lim++)
+	int ii = -1;
+	for (auto &lim : valid_indices)
 	{
+		ii++;
+		if (ii > max)
+			break;
 		std::ofstream output;
-		output.open("Function_"+std::to_string(lim)+".txt");
-		int num = 0;
-		for (int ii = 0; ii < size; ii++){
-			if (eigenvalues[ii] / EV_TO_J > 0 && eigenvalues[ii + 1] / EV_TO_J > E_max)
-			{
-					num = ii;
-					break;
-			}
-		}
-	
-		real integral_glob;
-		int lim_new;
-		{
-			int ii = last_index;
-			while(true)
-			{
-				integral_glob = norms[num-ii];
-				if (integral_glob > localization)
-					break;
-				ii++;
-			}
-			lim_new = ii;
-			last_index = ii + 1;
-		}
-		std::cout << lim  << " " << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
-		output_eigs  << lim << " "  << eigenvalues[num - lim_new] / EV_TO_J << " " << norms[num - lim_new] << "\n";
+		output.open("Function_"+std::to_string(ii)+".txt");
+		real integral_glob = norms[lim];
+		std::cout << ii  << " " << eigenvalues[lim] / EV_TO_J << " " << integral_glob << "\n";
+		output_eigs  << ii << " "  << eigenvalues[lim] / EV_TO_J << " " << integral_glob << "\n";
 		std::vector<std::complex<real>> coeffs;
 		coeffs.resize(size);
-		std::array<std::complex<real>, n_bands> spinor;
 		output << "x y psi\n";
 		for (int ii = 0; ii < size; ii++)
 		{
-			coeffs[ii] = hamiltonian[(num - lim_new) * size + ii];
+			coeffs[ii] = hamiltonian[lim * size + ii];
 	
 		}
 		for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
@@ -244,8 +241,8 @@ void nanoLK<T>::write_functions(real dx, real dy, int max, int up)
 				real to_plot=0;
 				for (int n = 0; n < n_bands; n++)
 				{
-					std::complex<real> value = get_value_at_point(num - lim_new, n, x, y, 0);
-					to_plot +=std::abs(value* value) / (integral_glob) / integral_glob;
+					std::complex<real> value = get_value_at_point(lim, n, x, y, 0);
+					to_plot +=std::abs(value* value) / integral_glob / integral_glob;
 				}
 				output << x << " " << y << " " << std::sqrt(to_plot)<< "\n";
 			}
@@ -259,7 +256,7 @@ inline void nanoLK<float>::diagonalize()
 	char flag_eigen = 'V';
 	char flag_triangle = 'L';
 	int info;
-	int lwork = 3 * size;
+	int lwork = 6 * size;
 	
 	std::vector<std::complex<float>> work;
 	work.resize(lwork);
@@ -276,7 +273,10 @@ inline void nanoLK<float>::diagonalize()
 	if (info != 0)
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
 	for (int ii = 0; ii < size; ii++)
-		std::cout << eigenvalues[ii] << std::endl;
+	{
+		norms[ii] = integrate_state(ii);
+	}
+	get_valid_indices();
 }
 
 
@@ -286,7 +286,7 @@ inline void nanoLK<double>::diagonalize()
 	char flag_eigen = 'V';
 	char flag_triangle = 'L';
 	int info;
-	int lwork = 4 * size;
+	int lwork = 6 * size;
 	
 	std::vector<std::complex<double>> work;
 	work.resize(lwork);
@@ -306,6 +306,7 @@ inline void nanoLK<double>::diagonalize()
 	{
 		norms[ii] = integrate_state(ii);
 	}
+	get_valid_indices();
 }
 
 
