@@ -8,5 +8,7 @@ main()
 	nn.assemble(0);
 	std::cout << "Diagonalization time!\n";
 	nn.diagonalize();
-	nn.write_functions(0.05e-9, 0.05e-9, 2, 8);
+	auto states = nn.get_indices();
+	std::cout << nn.integrate_state_and_derivative(states[0], states[0], 0);
+	//nn.write_functions(0.05e-9, 0.05e-9, 2, 8);
 }

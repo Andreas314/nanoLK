@@ -51,10 +51,19 @@ public:
 			G_x = 2.0 * M_PI / l_x;
 			G_y = 2.0 * M_PI / l_y;
 		};
+	
+	void set_E_max(real E){E_max = E;}
+	void set_E_min(real E){E_min = E;}
+	void set_localization(real loc){localization = loc;}
+	void set_res_x(int res){res_x = res;}
+	void set_res_y(int res){res_y = res;}
+	
 	void assemble(real );
 	void diagonalize();
-	void write_functions(real, real, int , int );
-	std::vector<ind> get_indices(){return valid_indices;}
+	void write_functions(real, real, int , int ) const;
+	std::vector<ind> get_indices() const{return valid_indices;}
+	std::complex<real> integrate_state_and_derivative(ind, ind, ind) const;
+	std::complex<real> integrate_state_and_state(ind, ind) const;
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
@@ -95,8 +104,8 @@ private:
 	
 	real integrate_state(int );
 	void get_valid_indices();
-	std::complex<real> get_value_at_point(int , int , real , real , real);
-	std::complex<real> get_derivative_at_point(int , int , int , real , real , real);
+	std::complex<real> get_value_at_point(int , int , real , real , real) const;
+	std::complex<real> get_derivative_at_point(int , int , int , real , real , real) const;
 	real k_z;
 	std::vector<real> norms;
 	int last_index = 0;
@@ -120,7 +129,47 @@ private:
 };
 
 template<class T>
-std::complex<T> nanoLK<T>::get_derivative_at_point(int state, int band, int direction, real x, real y, real z)
+std::complex<T> nanoLK<T>::integrate_state_and_state(ind state_1, ind state_2) const
+{
+	std::complex<real> integral = 0;
+	real dx = m_params.s_x / res_x;
+	real dy = m_params.s_y / res_y;
+	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
+	{
+		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
+		{
+			for (ind n = 0; n < n_bands; n++)
+			{
+				std::complex<real> at_point_state_1 = get_value_at_point(state_1, n, x, y, 0) / norms[state_1];
+				std::complex<real> at_point_state_2 = get_value_at_point(state_2, n, x, y, 0) / norms[state_2];
+				integral += (at_point_state_1 * std::conj(at_point_state_2)) *  static_cast<real>(dx * dy); 
+			}
+		}
+	}
+	return integral / l_x / l_y;
+}
+template<class T>
+std::complex<T> nanoLK<T>::integrate_state_and_derivative(ind state_s, ind state_d, ind direction) const
+{
+	std::complex<real> integral = 0;
+	real dx = m_params.s_x / res_x;
+	real dy = m_params.s_y / res_y;
+	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
+	{
+		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
+		{
+			for (ind n = 0; n < n_bands; n++)
+			{
+				std::complex<real> at_point_state = get_value_at_point(state_s, n, x, y, 0) / norms[state_s];
+				std::complex<real> at_point_derivative = get_derivative_at_point(state_d, n, direction, x, y, 0) / norms[state_d];
+				integral += (at_point_derivative * std::conj(at_point_state)) *  static_cast<real>(dx * dy); 
+			}
+		}
+	}
+	return integral / l_x / l_y;
+}
+template<class T>
+std::complex<T> nanoLK<T>::get_derivative_at_point(int state, int band, int direction, real x, real y, real z) const
 {
 
 	std::complex<real> value = 0;
@@ -154,7 +203,7 @@ std::complex<T> nanoLK<T>::get_derivative_at_point(int state, int band, int dire
 }
 
 template<class T>
-std::complex<T> nanoLK<T>::get_value_at_point(int state, int band, real x, real y, real z)
+std::complex<T> nanoLK<T>::get_value_at_point(int state, int band, real x, real y, real z) const
 {
 	std::complex<real> value = 0;
 	std::vector<std::complex<real>> coeffs;
@@ -211,7 +260,7 @@ void nanoLK<T>::get_valid_indices()
 }
 
 template<class T>
-void nanoLK<T>::write_functions(real dx, real dy, int max, int up)
+void nanoLK<T>::write_functions(real dx, real dy, int max, int up) const
 {
 	std::ofstream output_eigs;
 	output_eigs.open("Eigenvalues.txt");
