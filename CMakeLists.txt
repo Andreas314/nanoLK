@@ -3,12 +3,13 @@ cmake_minimum_required(VERSION 3.10)
 project(nanoLK)
 
 # Use GCC (optional, only if you want to force it)
-set(CMAKE_C_COMPILER gcc)
-set(CMAKE_CXX_COMPILER g++)
+set(CMAKE_C_COMPILER mpicc)
+set(CMAKE_CXX_COMPILER mpic++)
 
 # Use modern C++
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+#set(BLA_VENDOR OpenBLAS)
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 find_package(OpenMP REQUIRED)

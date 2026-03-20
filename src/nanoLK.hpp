@@ -1,3 +1,4 @@
+#pragma once
 #define H_PLANC 1.054571817e-34
 #define E_MASS 9.1093837e-31
 #define EV_TO_J 1.60217663e-19
@@ -60,10 +61,15 @@ public:
 	
 	void assemble(real );
 	void diagonalize();
-	void write_functions(real, real, int , int ) const;
+	void write_functions(real, real, int ) const;
 	std::vector<ind> get_indices() const{return valid_indices;}
+	std::vector<ind> get_valence_states() const{return valence_states;}
+	std::vector<ind> get_conduction_states() const{return conduction_states;}
 	std::complex<real> integrate_state_and_derivative(ind, ind, ind) const;
-	std::complex<real> integrate_state_and_state(ind, ind) const;
+	std::complex<real> integrate_state_and_state(ind, ind, ind, ind) const;
+	real get_P() const {return std::abs(m_params.p_0 * 
+			static_cast<real>(E_MASS/ H_PLANC));}
+	real get_energy(int i) const {return eigenvalues[i];}
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
@@ -100,7 +106,7 @@ private:
 	real l_x, l_y, G_x, G_y;
 	std::vector<std::complex<real>> hamiltonian;
 	std::vector<real> eigenvalues;
-	std::vector<int> valid_indices;
+	std::vector<int> valid_indices, valence_states, conduction_states;
 	
 	real integrate_state(int );
 	void get_valid_indices();
@@ -129,7 +135,7 @@ private:
 };
 
 template<class T>
-std::complex<T> nanoLK<T>::integrate_state_and_state(ind state_1, ind state_2) const
+std::complex<T> nanoLK<T>::integrate_state_and_state(ind state_1, ind state_2, ind band_1, ind band_2) const
 {
 	std::complex<real> integral = 0;
 	real dx = m_params.s_x / res_x;
@@ -138,12 +144,9 @@ std::complex<T> nanoLK<T>::integrate_state_and_state(ind state_1, ind state_2) c
 	{
 		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
 		{
-			for (ind n = 0; n < n_bands; n++)
-			{
-				std::complex<real> at_point_state_1 = get_value_at_point(state_1, n, x, y, 0) / norms[state_1];
-				std::complex<real> at_point_state_2 = get_value_at_point(state_2, n, x, y, 0) / norms[state_2];
-				integral += (at_point_state_1 * std::conj(at_point_state_2)) *  static_cast<real>(dx * dy); 
-			}
+			std::complex<real> at_point_state_1 = get_value_at_point(state_1, band_1, x, y, 0) / norms[state_1];
+			std::complex<real> at_point_state_2 = get_value_at_point(state_2, band_2, x, y, 0) / norms[state_2];
+			integral += (at_point_state_1 * std::conj(at_point_state_2)) *  static_cast<real>(dx * dy); 
 		}
 	}
 	return integral / l_x / l_y;
@@ -256,11 +259,17 @@ void nanoLK<T>::get_valid_indices()
 			valid_indices.push_back(ii);
 	}
 	std::reverse(valid_indices.begin(), valid_indices.end());
-
+	for (auto &ii : valid_indices)
+	{
+		if (eigenvalues[ii] > 0)
+			conduction_states.push_back(ii);
+		else
+			valence_states.push_back(ii);
+	}
 }
 
 template<class T>
-void nanoLK<T>::write_functions(real dx, real dy, int max, int up) const
+void nanoLK<T>::write_functions(real dx, real dy, int max) const
 {
 	std::ofstream output_eigs;
 	output_eigs.open("Eigenvalues.txt");
@@ -268,7 +277,7 @@ void nanoLK<T>::write_functions(real dx, real dy, int max, int up) const
 	for (auto &lim : valid_indices)
 	{
 		ii++;
-		if (ii > max)
+		if (max != -1 && ii > max)
 			break;
 		std::ofstream output;
 		output.open("Function_"+std::to_string(ii)+".txt");
