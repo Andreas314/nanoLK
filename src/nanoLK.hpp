@@ -61,7 +61,7 @@ public:
 	
 	void assemble(real );
 	void diagonalize();
-	void write_functions(real, real, int ) const;
+	void write_functions(real, real, int , bool ) const;
 	std::vector<ind> get_indices() const{return valid_indices;}
 	std::vector<ind> get_valence_states() const{return valence_states;}
 	std::vector<ind> get_conduction_states() const{return conduction_states;}
@@ -73,7 +73,7 @@ public:
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
-	real E_max = 10, E_min = -5, localization = 0.85;
+	real E_max = 10, E_min = -5, localization = 0.88;
 	int res_x = 20, res_y = 20;
 	struct params
 	{
@@ -93,7 +93,7 @@ private:
 		real gamma_3 = gamma_l_3 - 
 			  e_p / (6 * e_g + 2 * delta_so);
 		real a = 5.65e-10 ;
-		std::complex<real> p_0 =  - i_u * static_cast<std::complex<real>>(std::sqrt(e_p / 2 / E_MASS) * H_PLANC);
+		std::complex<real> p_0 =  static_cast<std::complex<real>>(std::sqrt(e_p / 2.0 / E_MASS) * H_PLANC);
 		real s_x = 10e-9 ;
 		real s_y = 10e-9 ;
 		real f_mx = 100 * EV_TO_J;
@@ -157,9 +157,9 @@ std::complex<T> nanoLK<T>::integrate_state_and_derivative(ind state_s, ind state
 	std::complex<real> integral = 0;
 	real dx = m_params.s_x / res_x;
 	real dy = m_params.s_y / res_y;
-	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
+	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 ; x+=dx)
 	{
-		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
+		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 ; y+=dy)
 		{
 			for (ind n = 0; n < n_bands; n++)
 			{
@@ -206,8 +206,7 @@ std::complex<T> nanoLK<T>::get_derivative_at_point(int state, int band, int dire
 }
 
 template<class T>
-std::complex<T> nanoLK<T>::get_value_at_point(int state, int band, real x, real y, real z) const
-{
+std::complex<T> nanoLK<T>::get_value_at_point(int state, int band, real x, real y, real z) const{
 	std::complex<real> value = 0;
 	std::vector<std::complex<real>> coeffs;
 	coeffs.resize(size);
@@ -233,12 +232,12 @@ std::complex<T> nanoLK<T>::get_value_at_point(int state, int band, real x, real 
 template<class T>
 T nanoLK<T>::integrate_state(int state)
 {
-	real integral = 0;
+	real integral = 0, integral_1 = 0;
 	real dx = m_params.s_x / res_x;
 	real dy = m_params.s_y / res_y;
-	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
+	for (real x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0; x+=dx)
 	{
-		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
+		for (real y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0; y+=dy)
 		{
 			for (int band = 0; band < n_bands; band++)
 			{
@@ -247,7 +246,19 @@ T nanoLK<T>::integrate_state(int state)
 			}
 		}
 	}
-	return std::sqrt(integral / l_x / l_y);
+	for (real x = -l_x / 2.0  ; x <= l_x / 2.0; x+=dx)
+	{
+		for (real y = -l_y / 2.0; y <= l_y / 2.0; y+=dy)
+		{
+			for (int band = 0; band < n_bands; band++)
+			{
+				std::complex<real> at_point = get_value_at_point(state, band, x, y, 0);
+				integral_1 += (at_point * std::conj(at_point)).real() *  static_cast<real>(dx * dy); 
+			}
+		}
+	}
+	//return std::sqrt(integral / l_x / l_y);
+	return integral / integral_1;
 
 }
 template<class T>
@@ -269,10 +280,11 @@ void nanoLK<T>::get_valid_indices()
 }
 
 template<class T>
-void nanoLK<T>::write_functions(real dx, real dy, int max) const
+void nanoLK<T>::write_functions(real dx, real dy, int max, bool write) const
 {
 	std::ofstream output_eigs;
-	output_eigs.open("Eigenvalues.txt");
+	int k = std::round(k_z * m_params.a / M_PI * 100);
+	output_eigs.open("Eigenvalues" + std::to_string(k) + ".txt");
 	int ii = -1;
 	for (auto &lim : valid_indices)
 	{
@@ -282,27 +294,30 @@ void nanoLK<T>::write_functions(real dx, real dy, int max) const
 		std::ofstream output;
 		output.open("Function_"+std::to_string(ii)+".txt");
 		real integral_glob = norms[lim];
-		std::cout << ii  << " " << eigenvalues[lim] / EV_TO_J << " " << integral_glob << "\n";
+		std::cout << ii  << " " << eigenvalues[lim] / EV_TO_J << " " << integral_glob <<  "\n";
 		output_eigs  << ii << " "  << eigenvalues[lim] / EV_TO_J << " " << integral_glob << "\n";
-		std::vector<std::complex<real>> coeffs;
-		coeffs.resize(size);
-		output << "x y psi\n";
-		for (int ii = 0; ii < size; ii++)
+		if (write)
 		{
-			coeffs[ii] = hamiltonian[lim * size + ii];
-	
-		}
-		for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
-		{
-			for (float y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
+			std::vector<std::complex<real>> coeffs;
+			coeffs.resize(size);
+			output << "x y psi\n";
+			for (int ii = 0; ii < size; ii++)
 			{
-				real to_plot=0;
-				for (int n = 0; n < n_bands; n++)
+				coeffs[ii] = hamiltonian[lim * size + ii];
+		
+			}
+			for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
+			{
+				for (float y = -m_params.s_y / 2.0; y <= m_params.s_y / 2.0 + dy; y+=dy)
 				{
-					std::complex<real> value = get_value_at_point(lim, n, x, y, 0);
-					to_plot +=std::abs(value* value) / integral_glob / integral_glob;
+					real to_plot=0;
+					for (int n = 0; n < n_bands; n++)
+					{
+						std::complex<real> value = get_value_at_point(lim, n, x, y, 0);
+						to_plot +=std::abs(value* value) / integral_glob / integral_glob;
+					}
+					output << x << " " << y << " " << std::sqrt(to_plot)<< "\n";
 				}
-				output << x << " " << y << " " << std::sqrt(to_plot)<< "\n";
 			}
 		}
 	}
@@ -342,7 +357,7 @@ template <>
 inline void nanoLK<double>::diagonalize()
 {
 	char flag_eigen = 'V';
-	char flag_triangle = 'L';
+	char flag_triangle = 'U';
 	int info;
 	int lwork = 6 * size;
 	
@@ -360,9 +375,13 @@ inline void nanoLK<double>::diagonalize()
 	
 	if (info != 0)
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
+	#pragma omp parallel for
 	for (int ii = 0; ii < size; ii++)
 	{
-		norms[ii] = integrate_state(ii);
+		if (eigenvalues[ii] < E_max && eigenvalues[ii] > E_min)
+			norms[ii] = integrate_state(ii);
+		else
+			norms[ii] = 0;
 	}
 	get_valid_indices();
 }
@@ -389,7 +408,7 @@ inline void nanoLK<T>::assemble(real k_z_)
 							vec index_2d = get_global_index(n_b_1, n_b_2, k, q);
 							//if (index_2d[0] < index_2d[1])
 							//	continue;
-							ind index_1d = index_2d[0] * size + index_2d[1];
+							ind index_1d = index_2d[1] * size + index_2d[0];
 							hamiltonian[index_1d] = element_right(n_b_1, n_b_2, k_z, k, q);
 						}
 
@@ -441,7 +460,7 @@ inline std::complex<T> nanoLK<T>::h0(vec k, vec q, std::complex<real> f, real f_
 	std::complex<real> result = 0;
 	if (k[0] == q[0] && k[1] == q[1])
 		result = f_md * weight;
-	result += 1.0f / l_x / l_y * xi_mx(q[0] - k[0], q[1] - k[1]) * (f - f_md * weight);
+	result += 1.0f / l_x / l_y * xi_mx(k[0] - q[0], k[1] - q[1]) * (f - f_md * weight);
 	return result;
 }
 
@@ -465,21 +484,23 @@ template <class T>
 inline std::complex<T> nanoLK<T>::element_o(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_c;
-	return f * k_z * (k_z* (k[0] == q[0] && k[1] == q[1])) + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1 ,1, k, q, f, 1);
+	return h0(k, q, f  *  k_z * k_z, m_params.f_mx, 1) + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1 ,1, k, q, f, 1);
 }
 
 template <class T>
 inline std::complex<T> nanoLK<T>::element_p(real k_z, vec k, vec q) const
 {
-	std::complex<real> f = pre_fact * m_params.gamma_1;
-	return f * k_z * (k_z*(k[0] == q[0] && k[1] == q[1])) + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1, 1, k, q, f, 1);
+	std::complex<real> f = -pre_fact * m_params.gamma_1;
+	return h0(k, q, f * k_z * k_z, m_params.f_mx, -1) + h2(0, 0, 0, 0, k, q, f, -1) + h2(1, 1, 1, 1, k, q, f, -1);
 }
 
 template <class T>
 inline std::complex<T> nanoLK<T>::element_q(real k_z, vec k, vec q, int weight) const
 {
-	std::complex<real> f = pre_fact * m_params.gamma_2;
-	return f * static_cast<std::complex<real>>(-2.0) *  k_z * (k_z* (k[0] == q[0] && k[1] == q[1]))  + h2(0, 0, 0, 0, k, q, f, weight) + h2(1, 1, 1, 1, k, q, f, weight);
+	int index = (weight == -1) ? -1 : 1;
+	//weight *= index;
+	auto f = pre_fact * m_params.gamma_2;
+	return  h0(k, q, -f * static_cast<std::complex<real>>(2.0) *  k_z * k_z, m_params.f_mx, weight)  + h2(0, 0, 0, 0, k, q, f, weight) + h2(1, 1, 1, 1, k, q, f, weight);
 }
 
 template <class T>
@@ -494,7 +515,8 @@ template <class T>
 inline std::complex<T> nanoLK<T>::element_s(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * std::sqrt(6) * m_params.gamma_3;
-	return h1(0, 0, k, q, f * k_z, 0 ) + h1(1, 1, k, q, f * (-i_u) * k_z, 0);
+	T outside = static_cast<T>(std::abs(k_z) > M_PI / m_params.a / 100000);
+	return (h1(0, 0, k, q, f * k_z, 0 ) + h1(1, 1, k, q, f * (-i_u) * k_z, 0));
 }
 
 template <class T>
@@ -507,12 +529,13 @@ inline std::complex<T> nanoLK<T>::element_t(vec k, vec q) const
 template <class T>
 inline std::complex<T> nanoLK<T>::element_u(real k_z, vec k, vec q) const
 {
-	return static_cast<std::complex<real>>(1.0 / std::sqrt(3))  * m_params.p_0 * ( k_z * (k[0] == q[0] && k[1] == q[1]));
+	return h0(k, q, static_cast<std::complex<real>>(1.0 / std::sqrt(3))  * m_params.p_0 * k_z, 0, 0);
 }
 
 template <class T>
 inline std::complex<T> nanoLK<T>::element_right(ind n_1, ind n_2, real k_z, vec k, vec q) const
 {
+	//std::swap(n_1, n_2);
 	auto is_this = [n_1, n_2](ind x, ind y) -> bool 
 		{
     			return ( (n_1 == x) && (n_2 == y) );	
@@ -527,11 +550,11 @@ inline std::complex<T> nanoLK<T>::element_right(ind n_1, ind n_2, real k_z, vec 
 	if (is_this(0,0) || is_this(4,4))
 		return h0(k, q, m_params.e_g, m_params.f_mx, 1) + element_o(k_z, k, q);
 	if (is_this(1,1) || is_this(5,5))
-		return -(element_p(k_z, k, q) + element_q(k_z, k, q, 1));
+		return (element_p(k_z, k, q) - element_q(k_z, k, q, 1));
 	if (is_this(2,2) || is_this(6,6))
-		return -(element_p(k_z, k, q) - element_q(k_z, k, q, 1));
+		return (element_p(k_z, k, q) + element_q(k_z, k, q, -1));
 	if (is_this(3,3) || is_this(7,7))
-		return -(element_p(k_z, k, q) + h0(k, q, m_params.delta_so, m_params.f_mx, 1));
+		return (element_p(k_z, k, q) - h0(k, q, m_params.delta_so, m_params.f_mx, 1));
 	
 	//elements with Q
 	if (is_this(2, 3) || is_this(3,2) || is_this(6,7) || is_this(7,6))
@@ -539,27 +562,27 @@ inline std::complex<T> nanoLK<T>::element_right(ind n_1, ind n_2, real k_z, vec 
 	
 	//elements with T
 	//with sqrt(3)
-	if (is_this(0, 1) || is_this(4,5))
+	if (is_this(0, 1) || is_this(5,4))
 		return static_cast<real>(-std::sqrt(3)) * element_t(k, q);
-	if (is_this(1, 0) || is_this(5,4))
+	if (is_this(1, 0) || is_this(4,5))
 		return static_cast<real>(-std::sqrt(3)) * std::conj(element_t(k, q));
 	//with(sqrt(2))
-	if (is_this(7, 0))
-		return static_cast<real>(-std::sqrt(2)) * std::conj(element_t(k, q));
-	if (is_this(4, 3))
-		return static_cast<real>(std::sqrt(2)) * std::conj(element_t(k, q));
 	if (is_this(0, 7))
-		return static_cast<real>(-std::sqrt(2)) * element_t(k, q);
+		return static_cast<real>(-std::sqrt(2)) * std::conj(element_t(k, q));
 	if (is_this(3, 4))
+		return static_cast<real>(std::sqrt(2)) * std::conj(element_t(k, q));
+	if (is_this(7, 0))
+		return static_cast<real>(-std::sqrt(2)) * element_t(k, q);
+	if (is_this(4, 3))
 		return static_cast<real>(std::sqrt(2)) * element_t(k, q);
 	//without prefactor
 	if (is_this(0, 6))
 		return -std::conj(element_t(k, q));
-	if (is_this(4, 2))
+	if (is_this(2, 4))
 		return std::conj(element_t(k, q));
 	if (is_this(6, 0))
 		return -element_t(k, q);
-	if (is_this(2, 4))
+	if (is_this(4, 2))
 		return element_t(k, q);
 
 	//eleemnts with U
@@ -576,45 +599,47 @@ inline std::complex<T> nanoLK<T>::element_right(ind n_1, ind n_2, real k_z, vec 
 
 	//elements with S
 	//with sqrt(3)
-	if (is_this(7, 2))
-		return static_cast<real>(std::sqrt(3)) * element_s(k_z, k, q);
-	if (is_this(6, 3))
-		return static_cast<real>(-std::sqrt(3)) * element_s(k_z, k, q);
 	if (is_this(2, 7))
-		return static_cast<real>(std::sqrt(3)) * std::conj(element_s(k_z, k, q));
+		return static_cast<real>(std::sqrt(3)) * element_s(k_z, k, q);
 	if (is_this(3, 6))
+		return static_cast<real>(-std::sqrt(3)) * element_s(k_z, k, q);
+	if (is_this(7, 2))
+		return static_cast<real>(std::sqrt(3)) * std::conj(element_s(k_z, k, q));
+	if (is_this(6, 3))
 		return static_cast<real>(-std::sqrt(3)) * std::conj(element_s(k_z, k, q));
 	//with sqrt(2)
-	if (is_this(2, 1) || is_this(5, 6))
-		return static_cast<real>(std::sqrt(2)) * element_s(k_z, k, q);
 	if (is_this(1, 2) || is_this(6, 5))
+		return static_cast<real>(std::sqrt(2)) * element_s(k_z, k, q);
+	if (is_this(2, 1) || is_this(5, 6))
 		return static_cast<real>(std::sqrt(2)) * std::conj(element_s(k_z, k, q));
 	//with no prefactor
-	if (is_this(3, 1) || is_this(5, 7))
-		return  -element_s(k_z, k, q);
 	if (is_this(1, 3) || is_this(7, 5))
+		return  -element_s(k_z, k, q);
+	if (is_this(3, 1) || is_this(5, 7))
 		return  -std::conj(element_s(k_z, k, q));
 	
 	//elements with R
 	//with sqrt(2)
-	if (is_this(1, 7))
-		return -static_cast<real>(std::sqrt(2)) * std::conj(element_r(k, q));
-	if (is_this(3, 5))
-		return static_cast<real>(std::sqrt(2)) * std::conj(element_r(k, q));
 	if (is_this(7, 1))
-		return -static_cast<real>(std::sqrt(2)) * element_r(k, q);
+		return -static_cast<real>(std::sqrt(2)) * std::conj(element_r(k, q));
 	if (is_this(5, 3))
+		return static_cast<real>(std::sqrt(2)) * std::conj(element_r(k, q));
+	if (is_this(1, 7))
+		return -static_cast<real>(std::sqrt(2)) * element_r(k, q);
+	if (is_this(3, 5))
 		return static_cast<real>(std::sqrt(2)) * element_r(k, q);
 	//with no prefactor
-	if (is_this(1, 6))
+	if (is_this(6, 	1))
 		return -std::conj(element_r(k, q));
-	if (is_this(2, 5))
-		return std::conj(element_r(k, q));
-	if (is_this(6, 1))
-		return -element_r(k, q);
 	if (is_this(5, 2))
+		return std::conj(element_r(k, q));
+	if (is_this(1, 6))
+		return -element_r(k, q);
+	if (is_this(2, 5))
 		return element_r(k, q);
 	return 0;
 
 
 }
+
+
