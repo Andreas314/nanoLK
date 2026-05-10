@@ -171,33 +171,50 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 	int Nv = valence_states.size();
 	std::complex<T> delta = i_u * 1e-3 / EV_TO_J;
 	QItensor.resize(n_steps);
+	std::array<std::vector<std::vector<std::complex<T>>>, 3> p;
+	
+	for (int a = 0; a < states.size(); a++ )
+	{
+		for (int b = a; b < states.size(); b++ )
+		{
+			for (int ind = 0; ind < 3; ind++ )
+			{
+				if (a == 0 && b == 0)
+ 				p[ind].assign(states.size(),
+		            std::vector<std::complex<T>>(states.size()));
+				std::complex<T> res = get_momentum(b, a, ind);
+				p[ind][b][a] = res;
+				p[ind][a][b] = std::conj(res);
+			}
+		}
+	}
+						
 		for (int k = 0; k < states.size(); k++ )
 		{
 			int ind_k = states[k];
 			T omega_k = hamiltonian.get_energy(ind_k) / H_PLANC;
 			if (mpi_rank == 0)
-			std::cout << (float)k / (float)states.size() <<"\n"; 
 			for (int l = 0; l < states.size(); l++ )
 			{
 				int ind_l = states[l];
-				std::complex<T> pa_kl = get_momentum(k, l, ind_1);
-				std::complex<T> pd_lk = get_momentum(l, k, ind_4);
+				std::complex<T> pa_kl = p[ind_1][k][l];
+				std::complex<T> pd_lk = p[ind_4][l][k];
 				for (int q = 0; q < states.size(); q++ )
 				{
 					int ind_q = states[q];
-					std::complex<T> pa_kq = get_momentum(k, q, ind_1);
-					std::complex<T> pb_lq = get_momentum(l, q, ind_2);
-					std::complex<T> pb_kq = get_momentum(k, q, ind_2);
-					std::complex<T> pc_ql = get_momentum(q, l, ind_3);
-					std::complex<T> pd_ql = get_momentum(q, l, ind_4);
-					std::complex<T> pd_qk = get_momentum(q, k, ind_4);
+					std::complex<T> pa_kq = p[ind_1][k][q];
+					std::complex<T> pb_lq = p[ind_2][l][q];
+					std::complex<T> pb_kq = p[ind_2][k][q];
+					std::complex<T> pc_ql = p[ind_3][q][l];
+					std::complex<T> pd_ql = p[ind_4][q][l];
+					std::complex<T> pd_qk = p[ind_4][q][k];
 					
-					std::complex<T> pa_qk = std::conj(pa_kq);
-					std::complex<T> pb_ql = std::conj(pb_lq);
-					std::complex<T> pb_qk = std::conj(pb_kq);
-					std::complex<T> pc_lq = std::conj(pc_ql);
-					std::complex<T> pd_lq = std::conj(pd_ql);
-					std::complex<T> pd_kq = std::conj(pd_qk);
+					std::complex<T> pa_qk = p[ind_1][q][k];
+					std::complex<T> pb_ql = p[ind_2][q][l];
+					std::complex<T> pb_qk = p[ind_2][q][k];
+					std::complex<T> pc_lq = p[ind_3][l][q];
+					std::complex<T> pd_lq = p[ind_4][l][q];
+					std::complex<T> pd_kq = p[ind_4][k][q];
 					T omega_qk = (hamiltonian.get_energy(ind_q) - hamiltonian.get_energy(ind_k)) / H_PLANC;
 					T omega_lq = (hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_q))/ H_PLANC;
 					for (auto & v : valence_states)
@@ -211,23 +228,23 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 						T omega_vl = -(hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_v))/ H_PLANC;
 						T omega_kv = -(hamiltonian.get_energy(ind_v) - hamiltonian.get_energy(ind_k))/ H_PLANC;
 
-						std::complex<T> pa_vk = get_momentum(v, k, ind_1);
-						std::complex<T> pb_qv = get_momentum(q, v, ind_2);
-						std::complex<T> pb_vk = get_momentum(v, k, ind_2);
-						std::complex<T> pc_lv = get_momentum(l, v, ind_3);
-						std::complex<T> pc_qv = get_momentum(q, v, ind_3);
-						std::complex<T> pd_vq = get_momentum(v, q, ind_4);
-						std::complex<T> pd_vk = get_momentum(v, k, ind_4);
-						std::complex<T> pd_lv = get_momentum(l, v, ind_4);
+						std::complex<T> pa_vk = p[ind_1][v][k];
+						std::complex<T> pb_qv = p[ind_2][q][v];
+						std::complex<T> pb_vk = p[ind_2][v][k];
+						std::complex<T> pc_lv = p[ind_3][l][v];
+						std::complex<T> pc_qv = p[ind_3][q][v];
+						std::complex<T> pd_vq = p[ind_4][v][q];
+						std::complex<T> pd_vk = p[ind_4][v][k];
+						std::complex<T> pd_lv = p[ind_4][l][v];
 						
-						std::complex<T> pa_kv = std::conj(pa_vk) ;
-						std::complex<T> pb_vq = std::conj(pb_qv) ;
-						std::complex<T> pb_kv = std::conj(pb_vk) ;
-						std::complex<T> pc_vl = std::conj(pc_lv) ;
-						std::complex<T> pc_vq = std::conj(pc_qv) ;
-						std::complex<T> pd_qv = std::conj(pd_vq) ;
-						std::complex<T> pd_kv = std::conj(pd_vk) ;
-						std::complex<T> pd_vl = std::conj(pd_lv) ;
+						std::complex<T> pa_kv = p[ind_1][k][v];
+						std::complex<T> pb_vq = p[ind_2][v][q];
+						std::complex<T> pb_kv = p[ind_2][k][v];
+						std::complex<T> pc_vl = p[ind_3][v][l];
+						std::complex<T> pc_vq = p[ind_3][v][q];
+						std::complex<T> pd_qv = p[ind_4][q][v];
+						std::complex<T> pd_kv = p[ind_4][k][v];
+						std::complex<T> pd_vl = p[ind_4][v][l];
 						
 						unsigned int counter = 0;
 						std::array<std::complex<T>, 8> nums;
@@ -240,11 +257,11 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 						nums[6] = pa_kq * pc_ql * pd_lv * pb_vk;
 						nums[7] = pa_kv * pc_vl * pd_lq * pb_qk;
 						
+						std::array<std::complex<T>, 8> denoms;
 						for (T & omega: omegas)
 						{
-							if (k == 0 && l == 0 && v == 0 && q == 0)
+							if (k == 0 && l == 0 && v == valence_states[0] && q == 0)		
 								QItensor[counter] = 0;
-							std::array<std::complex<T>, 8> denoms;
 							denoms[0] = -(-omega + omega_qv + delta)*
 								 (omega_qk - 2 * omega + delta);
 
@@ -268,9 +285,10 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 							
 							denoms[7] = -(-omega + omega_vl + delta)*
 								 (omega_vq - 2 * omega + delta);
-
+							std::complex<T> result = 0;
 							for (int cc = 0; cc < 8; cc++)
-								QItensor[counter] += nums[cc] / denoms[cc];
+								result += nums[cc] / denoms[cc];
+							QItensor[counter] = result;
 							counter++;
 						}
 					}
