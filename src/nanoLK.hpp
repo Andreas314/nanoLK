@@ -49,6 +49,7 @@ public:
 			hamiltonian.resize( ( size * size ));
 			eigenvalues.resize(size);
 			norms.resize(size);
+			localizations.resize(size);
 			G_x = 2.0 * M_PI / l_x;
 			G_y = 2.0 * M_PI / l_y;
 		};
@@ -67,13 +68,16 @@ public:
 	std::vector<ind> get_conduction_states() const{return conduction_states;}
 	std::complex<real> integrate_state_and_derivative(ind, ind, ind) const;
 	std::complex<real> integrate_state_and_state(ind, ind, ind, ind) const;
+	std::complex<real> get_value_at_point(int , int , real , real , real) const;
+	std::complex<real> get_derivative_at_point(int , int , int , real , real , real) const;
 	real get_P() const {return std::abs(m_params.p_0 * 
 			static_cast<real>(E_MASS/ H_PLANC));}
 	real get_energy(int i) const {return eigenvalues[i];}
+	std::array<real, 4> get_grid_info() const {return std::array<real, 4>{static_cast<real>(res_x), static_cast<real>(res_y), m_params.s_x, m_params.s_y};}
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
-	real E_max = 10, E_min = -5, localization = 0.88;
+	real E_max = 2.5, E_min = -0.7, localization = 0.8;
 	int res_x = 20, res_y = 20;
 	struct params
 	{
@@ -96,7 +100,7 @@ private:
 		std::complex<real> p_0 =  static_cast<std::complex<real>>(std::sqrt(e_p / 2.0 / E_MASS) * H_PLANC);
 		real s_x = 10e-9 ;
 		real s_y = 10e-9 ;
-		real f_mx = 100 * EV_TO_J;
+		real f_mx = 1 * EV_TO_J;
 	};
 
 	const params m_params;
@@ -108,12 +112,10 @@ private:
 	std::vector<real> eigenvalues;
 	std::vector<int> valid_indices, valence_states, conduction_states;
 	
-	real integrate_state(int );
+	void integrate_state(int );
 	void get_valid_indices();
-	std::complex<real> get_value_at_point(int , int , real , real , real) const;
-	std::complex<real> get_derivative_at_point(int , int , int , real , real , real) const;
 	real k_z;
-	std::vector<real> norms;
+	std::vector<real> norms, localizations;
 	int last_index = 0;
 
 	vec get_global_index(ind , ind , vec , vec ) const;
@@ -230,7 +232,7 @@ std::complex<T> nanoLK<T>::get_value_at_point(int state, int band, real x, real 
 
 
 template<class T>
-T nanoLK<T>::integrate_state(int state)
+void nanoLK<T>::integrate_state(int state)
 {
 	real integral = 0, integral_1 = 0;
 	real dx = m_params.s_x / res_x;
@@ -257,8 +259,8 @@ T nanoLK<T>::integrate_state(int state)
 			}
 		}
 	}
-	//return std::sqrt(integral / l_x / l_y);
-	return integral / integral_1;
+	localizations[state] =  integral / integral_1;
+	norms[state] = integral;
 
 }
 template<class T>
@@ -266,13 +268,14 @@ void nanoLK<T>::get_valid_indices()
 {
 	for (ind ii = 0; ii < size; ii++)
 	{
-		if (eigenvalues[ii] / EV_TO_J < E_max && eigenvalues[ii] / EV_TO_J > E_min && norms[ii] > localization)
+		if (eigenvalues[ii] / EV_TO_J < E_max && eigenvalues[ii] / EV_TO_J > E_min && localizations[ii] > localization)
 			valid_indices.push_back(ii);
 	}
 	std::reverse(valid_indices.begin(), valid_indices.end());
-	for (auto &ii : valid_indices)
+	for (ind ii = 0; ii < valid_indices.size(); ii++)
 	{
-		if (eigenvalues[ii] > 0)
+		ind jj = valid_indices[ii];
+		if (eigenvalues[jj] > 0)
 			conduction_states.push_back(ii);
 		else
 			valence_states.push_back(ii);
@@ -294,10 +297,10 @@ void nanoLK<T>::write_functions(real dx, real dy, int max, bool write) const
 		std::ofstream output;
 		output.open("Function_"+std::to_string(ii)+".txt");
 		real integral_glob = norms[lim];
-		std::cout << ii  << " " << eigenvalues[lim] / EV_TO_J << " " << integral_glob <<  "\n";
-		output_eigs  << ii << " "  << eigenvalues[lim] / EV_TO_J << " " << integral_glob << "\n";
+		output_eigs  << ii << " "  << eigenvalues[lim] / EV_TO_J << " " << localizations[lim] << "\n";
 		if (write)
 		{
+			std::cout << ii  << " " << eigenvalues[lim] / EV_TO_J << " " << localizations[lim] <<  "\n";
 			std::vector<std::complex<real>> coeffs;
 			coeffs.resize(size);
 			output << "x y psi\n";
@@ -347,7 +350,11 @@ inline void nanoLK<float>::diagonalize()
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
 	for (int ii = 0; ii < size; ii++)
 	{
-		norms[ii] = integrate_state(ii);
+		if (eigenvalues[ii] < E_max && eigenvalues[ii] > E_min)
+			integrate_state(ii);
+		else
+			norms[ii] = 1;
+			localizations[ii] = 0;
 	}
 	get_valid_indices();
 }
@@ -357,7 +364,7 @@ template <>
 inline void nanoLK<double>::diagonalize()
 {
 	char flag_eigen = 'V';
-	char flag_triangle = 'U';
+	char flag_triangle = 'L';
 	int info;
 	int lwork = 6 * size;
 	
@@ -379,9 +386,12 @@ inline void nanoLK<double>::diagonalize()
 	for (int ii = 0; ii < size; ii++)
 	{
 		if (eigenvalues[ii] < E_max && eigenvalues[ii] > E_min)
-			norms[ii] = integrate_state(ii);
+			integrate_state(ii);
 		else
-			norms[ii] = 0;
+		{
+			norms[ii] = 1;
+			localizations[ii] = 0;
+		}
 	}
 	get_valid_indices();
 }
@@ -406,8 +416,6 @@ inline void nanoLK<T>::assemble(real k_z_)
 						for (ind n_b_2 = 0; n_b_2 < n_bands; n_b_2++)
 						{
 							vec index_2d = get_global_index(n_b_1, n_b_2, k, q);
-							//if (index_2d[0] < index_2d[1])
-							//	continue;
 							ind index_1d = index_2d[1] * size + index_2d[0];
 							hamiltonian[index_1d] = element_right(n_b_1, n_b_2, k_z, k, q);
 						}
@@ -457,10 +465,11 @@ inline T nanoLK<T>::xi_mx(ind k_x, ind k_y) const
 template <class T>
 inline std::complex<T> nanoLK<T>::h0(vec k, vec q, std::complex<real> f, real f_md, int weight) const
 {
+	T sigma = m_params.s_x / 10.0;
 	std::complex<real> result = 0;
 	if (k[0] == q[0] && k[1] == q[1])
 		result = f_md * weight;
-	result += 1.0f / l_x / l_y * xi_mx(k[0] - q[0], k[1] - q[1]) * (f - f_md * weight);
+	result += static_cast<real>(1.0 / l_x / l_y) * xi_mx(k[0] - q[0], k[1] - q[1]) * (f - f_md * weight);
 	return result;
 }
 
@@ -515,7 +524,6 @@ template <class T>
 inline std::complex<T> nanoLK<T>::element_s(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * std::sqrt(6) * m_params.gamma_3;
-	T outside = static_cast<T>(std::abs(k_z) > M_PI / m_params.a / 100000);
 	return (h1(0, 0, k, q, f * k_z, 0 ) + h1(1, 1, k, q, f * (-i_u) * k_z, 0));
 }
 

@@ -2,6 +2,9 @@
 #define f_2 1/sqrt(2)
 #define f_3 1/sqrt(3)
 #define f_6 1/sqrt(6)
+#define EV_TO_J 1.60217663e-19
+#define H_PLANC 1.054571817e-34
+#define E_MASS 9.1093837e-31
 
 #include "nanoLK.hpp"
 
@@ -13,19 +16,34 @@ class matrixP
 {
 	public:
 		using tensor4D = std::array<std::array<std::array<std::array<std::complex<T>, 3>, 3>, 3>, 3>;
-		matrixP(nanoLK<T> &hamiltonian_, T k_z_min_, T k_z_max_, T k_z_step_, MPI_Comm& mpi_comm_, int mpi_rank_, int mpi_size_):
+		matrixP(nanoLK<T> &hamiltonian_, T k_z_min_, T k_z_max_, T k_z_step_,T omega_min_, T omega_max_, int n_steps_,  MPI_Comm& mpi_comm_, int mpi_rank_, int mpi_size_):
 			hamiltonian(hamiltonian_),
 			k_z_min(k_z_min_),
 			k_z_max(k_z_max_),
 			k_z_step(k_z_step_),
 			mpi_comm(mpi_comm_),
 			mpi_rank(mpi_rank_),
-			mpi_size(mpi_size_)
+			mpi_size(mpi_size_),
+			omega_min(omega_min_),
+			omega_max(omega_max_),
+			n_steps(n_steps_)
 			{
 				assemble_px();
 				assemble_py();
 				assemble_pz();
 				P = hamiltonian.get_P();
+				auto opt = hamiltonian.get_grid_info();
+				res_x = static_cast<int>(opt[0]);
+				res_y = static_cast<int>(opt[1]);
+				s_x = opt[2];
+				s_y = opt[3];
+				omega_min *= EV_TO_J;
+				omega_max *= EV_TO_J;
+				T domega = (omega_max - omega_min) / n_steps;
+				omegas.resize(n_steps);
+				for (int step = 0; step < n_steps; step++)
+					omegas[step] = omega_min + domega * step;
+
 			};
 	void run();
 	void write_to_file();
@@ -37,19 +55,23 @@ class matrixP
 		T P;
 		T k_z_min, k_z_max, k_z_step;
 		nanoLK<T> &hamiltonian;
+		std::vector<std::vector<std::vector<std::vector<std::complex<T>>>>> functions, derivative_x, derivative_y;
 		std::vector<int> states, valence_states, conduction_states;
+		void pre_evaluate();
 		std::complex<T> get_momentum(int, int, int);
-		std::complex<T> get_qi_element(int, int, int, int);
+		void get_qi_element(int, int, int, int);
 		constexpr static int n_bands = 8;
-		
-		
+		int res_x, res_y, n_steps;
+		T s_x, s_y, omega_min, omega_max;
+		std::vector<T> omegas;
+
 		void to_complex(std::array<T, 4 * n_bands * n_bands> &inp, std::array<std::array<std::complex<T>, n_bands>, n_bands> &output);
 		void assemble_px();
 		void assemble_py();
 		void assemble_pz();
 		void copy_other_half(std::array<T, 4 * n_bands * n_bands> &values);
 		std::array<std::array<std::complex<T>, n_bands>, n_bands> p_z, p_y, p_x;
-		tensor4D QItensor;
+		std::vector<std::complex<T>> QItensor;
 	
 };
 template <>
@@ -64,98 +86,197 @@ void matrixP<double>::run()
 		states = hamiltonian.get_indices();
 		valence_states = hamiltonian.get_valence_states();
 		conduction_states = hamiltonian.get_conduction_states();
+		functions.assign(
+		    states.size(),
+		    std::vector<std::vector<std::vector<std::complex<T>>>>(
+		        8,
+		        std::vector<std::vector<std::complex<T>>>(
+		            res_y,
+		            std::vector<std::complex<T>>(res_x)
+		        )
+		    )
+		);
+		derivative_x.assign(
+		    states.size(),
+		    std::vector<std::vector<std::vector<std::complex<T>>>>(
+		        8,
+		        std::vector<std::vector<std::complex<T>>>(
+		            res_y,
+		            std::vector<std::complex<T>>(res_x)
+		        )
+		    )
+		);
+		derivative_y.assign(
+		    states.size(),
+		    std::vector<std::vector<std::vector<std::complex<T>>>>(
+		        8,
+		        std::vector<std::vector<std::complex<T>>>(
+		            res_y,
+		            std::vector<std::complex<T>>(res_x)
+		        )
+		    )
+		);
+		pre_evaluate();
 		std::cout << "Sum on " << mpi_rank << " with k_z = " << k  << std::endl;
-		#pragma omp parallel for
-		for (int ind = 0; ind < 81; ind++)
-		{
-			int ind_1 = ind / 27;
-			int ind_2 = (ind % 27) / 9;
-			int ind_3 = ((ind % 27) % 9) / 3;
-			int ind_4 = ((ind % 27) % 9) % 3;
-			if (mpi_rank == 0)
-				std::cout << ind / 81.0 << "\n";
-			QItensor[ind_1][ind_2][ind_3][ind_4] = get_qi_element(ind_1, ind_2, ind_3, ind_4);
-		}
+		get_qi_element(0, 0, 0, 0);
 	}
 	if (mpi_rank == 0) 
 	{
-   		MPI_Reduce(MPI_IN_PLACE, QItensor.data(), 81, MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
+   		MPI_Reduce(MPI_IN_PLACE, QItensor.data(), n_steps, MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
 	} 
 	else 
 	{
-   		 MPI_Reduce(QItensor.data(), nullptr , 81, MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
+   		 MPI_Reduce(QItensor.data(), nullptr , n_steps, MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
 	}
 	if (mpi_rank == 0)
-		std::cout << QItensor[0][0][0][0];
+		for(int step = 0; step < n_steps; step++)
+		{
+			std::cout << omegas[step] / EV_TO_J << " " << QItensor[step] << "\n";
+		}
 }
 
-template <>
-void matrixP<float>::run()
+template <class T>
+void matrixP<T>::pre_evaluate()
 {
-	using T = float;
-	for (T k = k_z_min; k < k_z_max - k_z_step / 2.0; k += k_z_step)
+	T dx = s_x / (res_x - 1);
+	T dy = s_y / (res_y - 1);
+	for (int band = 0; band < 8; band++)
 	{
-		hamiltonian.assemble(k);
-		std::cout << "Diagonalize on " << mpi_rank << " with k_z = " << k  << std::endl;
-		hamiltonian.diagonalize();
-		states = hamiltonian.get_indices();
-		valence_states = hamiltonian.get_valence_states();
-		conduction_states = hamiltonian.get_conduction_states();
-		std::cout << "Sum on " << mpi_rank << " with k_z = " << k  << std::endl;
-		#pragma omp parallel for
-		for (int ind = 0; ind < 81; ind++)
+		int counter = 0;
+		for (int &state: states)
 		{
-			int ind_1 = ind / 27;
-			int ind_2 = (ind % 27) / 9;
-			int ind_3 = ((ind % 27) % 9) / 3;
-			int ind_4 = ((ind % 27) % 9) % 3;
-			QItensor[ind_1][ind_2][ind_3][ind_4] = get_qi_element(ind_1, ind_2, ind_3, ind_4);
+			for (int n_x = 0; n_x < res_x; n_x++)
+			{
+				T x = -s_x / 2.0 + n_x * dx;	
+				for (int n_y = 0; n_y < res_y; n_y++)
+				{
+					T y = -s_y / 2.0 + n_y * dy;
+					std::complex<T> value = hamiltonian.get_value_at_point(state, band, x, y, 0);
+					std::complex<T> dvalue_dx = hamiltonian.get_derivative_at_point(state, band, 0, x, y, 0);
+					std::complex<T> dvalue_dy = hamiltonian.get_derivative_at_point(state, band, 1, x, y, 0);
+					functions[counter][band][n_y][n_x] = value;
+					derivative_x[counter][band][n_y][n_x] = dvalue_dx;
+					derivative_y[counter][band][n_y][n_x] = dvalue_dy;
+				}
+
+			}
+		counter++;
 		}
-	}
-	if (mpi_rank == 0) 
-	{
-   		MPI_Reduce(MPI_IN_PLACE, QItensor.data(), 81, MPI_C_FLOAT_COMPLEX, MPI_SUM, 0, mpi_comm);
-	} 
-	else 
-	{
-   		 MPI_Reduce(QItensor.data(), nullptr , 81, MPI_C_FLOAT_COMPLEX, MPI_SUM, 0, mpi_comm);
 	}
 }
 
 template <class T>
-std::complex<T> matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
+void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 {
-	std::complex<T> result = 0;
-	T omega_0 = 0.8 / EV_TO_J / H_PLANC;
-	T sigma = 0.3 / EV_TO_J / H_PLANC;
-	auto gauss = [omega_0, sigma](T omega) -> T
-	{
-   		return 1.0 / std::sqrt(2 * M_PI) / sigma * exp(-0.5 * std::pow((2 * omega_0 - omega) / sigma, 2));
-	};
-	for (auto &cond : conduction_states)
-	{
-		auto p_cc = get_momentum(cond, cond, ind_1);
-		for (auto &val : valence_states)
+	int Nv = valence_states.size();
+	std::complex<T> delta = i_u * 1e-3 / EV_TO_J;
+	QItensor.resize(n_steps);
+		for (int k = 0; k < states.size(); k++ )
 		{
-			auto p_vv = get_momentum(val, val, ind_1);
-			auto p_vc = get_momentum(val, cond, ind_2);
-			T omega_cv = (hamiltonian.get_energy(cond) - hamiltonian.get_energy(val)) / H_PLANC;
-			T weight = gauss(omega_cv);
-			for (auto &inter : states)
+			int ind_k = states[k];
+			T omega_k = hamiltonian.get_energy(ind_k) / H_PLANC;
+			if (mpi_rank == 0)
+			std::cout << (float)k / (float)states.size() <<"\n"; 
+			for (int l = 0; l < states.size(); l++ )
 			{
-				T omega_ci = (hamiltonian.get_energy(cond) - hamiltonian.get_energy(inter)) / H_PLANC;
-				auto p_iv = get_momentum(inter, val, ind_3);
-				auto p_ci = get_momentum(cond, inter, ind_4);
-				
-				auto p_ic = get_momentum(inter, cond, ind_3);
-				auto p_vi = get_momentum(val, inter, ind_4);
-				result += (p_cc - p_vv) * p_vc * (p_ci * p_iv + p_vi * p_ic) / (omega_0 + omega_ci) * weight;
+				int ind_l = states[l];
+				std::complex<T> pa_kl = get_momentum(k, l, ind_1);
+				std::complex<T> pd_lk = get_momentum(l, k, ind_4);
+				for (int q = 0; q < states.size(); q++ )
+				{
+					int ind_q = states[q];
+					std::complex<T> pa_kq = get_momentum(k, q, ind_1);
+					std::complex<T> pb_lq = get_momentum(l, q, ind_2);
+					std::complex<T> pb_kq = get_momentum(k, q, ind_2);
+					std::complex<T> pc_ql = get_momentum(q, l, ind_3);
+					std::complex<T> pd_ql = get_momentum(q, l, ind_4);
+					std::complex<T> pd_qk = get_momentum(q, k, ind_4);
+					
+					std::complex<T> pa_qk = std::conj(pa_kq);
+					std::complex<T> pb_ql = std::conj(pb_lq);
+					std::complex<T> pb_qk = std::conj(pb_kq);
+					std::complex<T> pc_lq = std::conj(pc_ql);
+					std::complex<T> pd_lq = std::conj(pd_ql);
+					std::complex<T> pd_kq = std::conj(pd_qk);
+					T omega_qk = (hamiltonian.get_energy(ind_q) - hamiltonian.get_energy(ind_k)) / H_PLANC;
+					T omega_lq = (hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_q))/ H_PLANC;
+					for (auto & v : valence_states)
+					{
+						int ind_v = states[v];
+						T omega_qv = (hamiltonian.get_energy(ind_q) - hamiltonian.get_energy(ind_v)) / H_PLANC;
+						T omega_lv = (hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_v))/ H_PLANC;
+						T omega_vk = (hamiltonian.get_energy(ind_v) - hamiltonian.get_energy(ind_k))/ H_PLANC;
+						
+						T omega_vq = -(hamiltonian.get_energy(ind_q) - hamiltonian.get_energy(ind_v)) / H_PLANC;
+						T omega_vl = -(hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_v))/ H_PLANC;
+						T omega_kv = -(hamiltonian.get_energy(ind_v) - hamiltonian.get_energy(ind_k))/ H_PLANC;
+
+						std::complex<T> pa_vk = get_momentum(v, k, ind_1);
+						std::complex<T> pb_qv = get_momentum(q, v, ind_2);
+						std::complex<T> pb_vk = get_momentum(v, k, ind_2);
+						std::complex<T> pc_lv = get_momentum(l, v, ind_3);
+						std::complex<T> pc_qv = get_momentum(q, v, ind_3);
+						std::complex<T> pd_vq = get_momentum(v, q, ind_4);
+						std::complex<T> pd_vk = get_momentum(v, k, ind_4);
+						std::complex<T> pd_lv = get_momentum(l, v, ind_4);
+						
+						std::complex<T> pa_kv = std::conj(pa_vk) ;
+						std::complex<T> pb_vq = std::conj(pb_qv) ;
+						std::complex<T> pb_kv = std::conj(pb_vk) ;
+						std::complex<T> pc_vl = std::conj(pc_lv) ;
+						std::complex<T> pc_vq = std::conj(pc_qv) ;
+						std::complex<T> pd_qv = std::conj(pd_vq) ;
+						std::complex<T> pd_kv = std::conj(pd_vk) ;
+						std::complex<T> pd_vl = std::conj(pd_lv) ;
+						
+						unsigned int counter = 0;
+						std::array<std::complex<T>, 8> nums;
+						nums[0] = pa_kl * pb_lq * pc_qv * pd_vk;
+						nums[1] = pa_kl * pb_lq * pc_qv * pd_vk;
+						nums[2] = pa_kl * pc_lv * pd_vq * pb_qk;
+						nums[3] = pa_kl * pc_lv * pd_vq * pb_qk;
+						nums[4] = pa_vk * pb_kq * pc_ql * pd_lv;
+						nums[5] = pa_kq * pb_qv * pc_vl * pd_lk;
+						nums[6] = pa_kq * pc_ql * pd_lv * pb_vk;
+						nums[7] = pa_kv * pc_vl * pd_lq * pb_qk;
+						
+						for (T & omega: omegas)
+						{
+							if (k == 0 && l == 0 && v == 0 && q == 0)
+								QItensor[counter] = 0;
+							std::array<std::complex<T>, 8> denoms;
+							denoms[0] = -(-omega + omega_qv + delta)*
+								 (omega_qk - 2 * omega + delta);
+
+							denoms[1] = -(-omega + omega_vk + delta)*
+								 (omega_qk - 2 * omega + delta);
+							
+							denoms[2] = (-omega + omega_lv + delta) *
+								 (omega_lq - 2 * omega + delta);
+							
+							denoms[3] = (-omega + omega_vq + delta) *
+								 (omega_lq - 2 * omega + delta);
+							
+							denoms[4] = (-omega + omega_lv + delta) *
+								 (omega_qv - 2 * omega + delta);
+							
+							denoms[5] = (-omega + omega_vl + delta) *
+								 (omega_vq - 2 * omega + delta);
+							
+							denoms[6] = -(-omega + omega_lv + delta)*
+								 (omega_qv - 2 * omega + delta);
+							
+							denoms[7] = -(-omega + omega_vl + delta)*
+								 (omega_vq - 2 * omega + delta);
+
+							for (int cc = 0; cc < 8; cc++)
+								QItensor[counter] += nums[cc] / denoms[cc];
+							counter++;
+						}
+					}
+				}
 			}
 		}
-	}
-	//std::cout << result << std::endl;
-	return result;
-
 
 }
 
@@ -179,26 +300,66 @@ void matrixP<T>::to_complex(std::array<T, 4 * n_bands * n_bands> &inp, std::arra
 template <class T>
 std::complex<T> matrixP<T>::get_momentum(int state_1, int state_2, int direction)
 {
-	std::complex<T> interband = - i_u * static_cast<T>(H_PLANC) * hamiltonian.integrate_state_and_derivative(state_1, state_2, direction);
+//Lambda for <F_n^j|F_m^i>
+	auto integrate_func = [this, state_1, state_2](int band_a, int band_b) {
+  		T dx = this->s_x / this->res_x;
+  		T dy = this->s_y / this->res_y;
+		std::complex<T> result = 0;
+		for (int nx = 0; nx < res_x; nx++)
+		{
+			for (int ny = 0; ny < res_y; ny++)
+			{
+				result += std::conj(this->functions[state_1][band_a][ny][nx]) *
+						this->functions[state_2][band_b][ny][nx];
+			}
+		}
+		result *= (dx * dy);
+		return result;
+	};
+
+//Lambda for <F_n^j|p_dir|F_m^i>
+	auto integrate_der = [this, direction, state_1, state_2](int band_a, int band_b) {
+  		T dx = this->s_x / this->res_x;
+  		T dy = this->s_y / this->res_y;
+		std::complex<T> result = 0;
+		for (int nx = 0; nx < res_x; nx++)
+		{
+			for (int ny = 0; ny < res_y; ny++)
+			{
+				if (direction == 0)
+					result += i_u * std::conj(this->functions[state_1][band_a][ny][nx]) *
+						this->derivative_x[state_2][band_b][ny][nx];
+				else
+					result += std::conj(this->functions[state_1][band_a][ny][nx]) *
+						this->derivative_y[state_2][band_b][ny][nx];
+			}
+		}
+		result *= (dx * dy);
+		return result;
+	};
+
+
 	std::complex<T> intraband= 0.0;
+	std::complex<T> interband= 0.0;
 	std::array<std::array<std::array<std::complex<T>, n_bands>, n_bands>*, 3> ps{&p_x, &p_y, &p_z};
 	auto p = ps[direction];
 	for (int ii = 0; ii < n_bands; ii++)
 	{
+		if (state_1 != state_2)
+			intraband += -i_u * static_cast<T>(H_PLANC)*integrate_der(ii, ii);
 		for (int jj = ii; jj < n_bands; jj++)
 		{
 			std::complex<T> res;
 			if  ( std::abs((*p)[ii][jj]) != 0)
 			{
-				res = P * ( (*p)[ii][jj] * 
-					hamiltonian.integrate_state_and_state(state_1, state_2, ii, jj));
-				intraband += res;
-				if (ii != jj)
-					intraband += std::conj(res);
+				if (ii == jj)
+					interband += P * integrate_func(ii, jj) * (*p)[ii][jj];
+				else
+					interband += P * std::conj(integrate_func(ii, jj) * ((*p)[ii][jj]));
 			}
 		}
 	}
-	return intraband + interband;
+	return (intraband + interband);
 
 
 }
