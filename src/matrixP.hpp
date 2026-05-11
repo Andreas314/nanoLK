@@ -37,12 +37,18 @@ class matrixP
 				res_y = static_cast<int>(opt[1]);
 				s_x = opt[2];
 				s_y = opt[3];
+				l_x = opt[4];
+				l_y = opt[5];
 				omega_min *= EV_TO_J;
 				omega_max *= EV_TO_J;
 				T domega = (omega_max - omega_min) / n_steps;
 				omegas.resize(n_steps);
+				QItensor.resize(n_steps);
 				for (int step = 0; step < n_steps; step++)
-					omegas[step] = omega_min + domega * step;
+				{
+					omegas[step] = (omega_min + domega * step) / H_PLANC;
+					QItensor[step] = 0;
+				}
 
 			};
 	void run();
@@ -62,9 +68,10 @@ class matrixP
 		void get_qi_element(int, int, int, int);
 		constexpr static int n_bands = 8;
 		int res_x, res_y, n_steps;
-		T s_x, s_y, omega_min, omega_max;
+		T s_x, s_y, omega_min, omega_max, l_x, l_y;
 		std::vector<T> omegas;
-
+		
+		T lattice = 5.56e-10;
 		void to_complex(std::array<T, 4 * n_bands * n_bands> &inp, std::array<std::array<std::complex<T>, n_bands>, n_bands> &output);
 		void assemble_px();
 		void assemble_py();
@@ -117,23 +124,28 @@ void matrixP<double>::run()
 		    )
 		);
 		pre_evaluate();
-		std::cout << "Sum on " << mpi_rank << " with k_z = " << k  << std::endl;
-		get_qi_element(0, 0, 0, 0);
+		std::cout << "Sum on " << mpi_rank << "v = " << valence_states.size() << " c = " << conduction_states.size() << " t = " << states.size() << "\n";
+		get_qi_element(1, 0, 0, 0);
 	}
-	if (mpi_rank == 0) 
+	std::cout << mpi_rank << " done!\n";
+	MPI_Barrier(mpi_comm);
+
+	if (mpi_rank == 0)
 	{
-   		MPI_Reduce(MPI_IN_PLACE, QItensor.data(), n_steps, MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
-	} 
-	else 
+	    MPI_Reduce(MPI_IN_PLACE, QItensor.data(), n_steps,
+	               MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
+	}
+	else
 	{
-   		 MPI_Reduce(QItensor.data(), nullptr , n_steps, MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
+	    MPI_Reduce(QItensor.data(), QItensor.data(), n_steps,
+	               MPI_C_DOUBLE_COMPLEX, MPI_SUM, 0, mpi_comm);
 	}
 	if (mpi_rank == 0)
 		for(int step = 0; step < n_steps; step++)
 		{
-			std::cout << omegas[step] / EV_TO_J << " " << QItensor[step] << "\n";
+			std::cout << omegas[step] / EV_TO_J * H_PLANC << " " << std::abs(QItensor[step]) * k_z_step * M_PI / lattice << "\n";
 		}
-}
+	}
 
 template <class T>
 void matrixP<T>::pre_evaluate()
@@ -169,10 +181,9 @@ template <class T>
 void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 {
 	int Nv = valence_states.size();
-	std::complex<T> delta = i_u * 1e-3 / EV_TO_J;
-	QItensor.resize(n_steps);
+	std::complex<T> delta = i_u * 1e-3 * EV_TO_J / H_PLANC;
 	std::array<std::vector<std::vector<std::complex<T>>>, 3> p;
-	
+	std::complex<T> prefactor = std::pow(EV_TO_J / E_MASS, (T)4) / std::pow(H_PLANC, (T)3) / s_x / s_y  * i_u * static_cast<T>(2.0 /  valence_states.size());
 	for (int a = 0; a < states.size(); a++ )
 	{
 		for (int b = a; b < states.size(); b++ )
@@ -193,7 +204,6 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 		{
 			int ind_k = states[k];
 			T omega_k = hamiltonian.get_energy(ind_k) / H_PLANC;
-			if (mpi_rank == 0)
 			for (int l = 0; l < states.size(); l++ )
 			{
 				int ind_l = states[l];
@@ -256,15 +266,11 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 						nums[5] = pa_kq * pb_qv * pc_vl * pd_lk;
 						nums[6] = pa_kq * pc_ql * pd_lv * pb_vk;
 						nums[7] = pa_kv * pc_vl * pd_lq * pb_qk;
-						
 						std::array<std::complex<T>, 8> denoms;
 						for (T & omega: omegas)
 						{
-							if (k == 0 && l == 0 && v == valence_states[0] && q == 0)		
-								QItensor[counter] = 0;
 							denoms[0] = -(-omega + omega_qv + delta)*
 								 (omega_qk - 2 * omega + delta);
-
 							denoms[1] = -(-omega + omega_vk + delta)*
 								 (omega_qk - 2 * omega + delta);
 							
@@ -288,12 +294,16 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 							std::complex<T> result = 0;
 							for (int cc = 0; cc < 8; cc++)
 								result += nums[cc] / denoms[cc];
-							QItensor[counter] = result;
+							QItensor[counter] += result * prefactor;
 							counter++;
 						}
 					}
 				}
 			}
+		}
+		for (int counter = 0; counter < omegas.size(); counter++)
+		{
+			QItensor[counter] /= std::pow(omegas[counter], (T)3);
 		}
 
 }
@@ -328,10 +338,12 @@ std::complex<T> matrixP<T>::get_momentum(int state_1, int state_2, int direction
 			for (int ny = 0; ny < res_y; ny++)
 			{
 				result += std::conj(this->functions[state_1][band_a][ny][nx]) *
-						this->functions[state_2][band_b][ny][nx];
+						this->functions[state_2][band_b][ny][nx] /
+						std::sqrt(this->hamiltonian.get_norm(states[state_1]) /
+						this->hamiltonian.get_norm(states[state_2]));
 			}
 		}
-		result *= (dx * dy);
+		result *= (dx * dy) / l_x / l_y;
 		return result;
 	};
 
@@ -346,13 +358,17 @@ std::complex<T> matrixP<T>::get_momentum(int state_1, int state_2, int direction
 			{
 				if (direction == 0)
 					result += i_u * std::conj(this->functions[state_1][band_a][ny][nx]) *
-						this->derivative_x[state_2][band_b][ny][nx];
+						this->derivative_x[state_2][band_b][ny][nx] /
+					std::sqrt(this->hamiltonian.get_norm(states[state_1]) /
+						this->hamiltonian.get_norm(states[state_2]));
 				else
 					result += std::conj(this->functions[state_1][band_a][ny][nx]) *
-						this->derivative_y[state_2][band_b][ny][nx];
+						this->derivative_y[state_2][band_b][ny][nx] /
+					std::sqrt(this->hamiltonian.get_norm(states[state_1]) /
+						this->hamiltonian.get_norm(states[state_2]));
 			}
 		}
-		result *= (dx * dy);
+		result *= (dx * dy) / l_x / l_y;
 		return result;
 	};
 
@@ -370,9 +386,8 @@ std::complex<T> matrixP<T>::get_momentum(int state_1, int state_2, int direction
 			std::complex<T> res;
 			if  ( std::abs((*p)[ii][jj]) != 0)
 			{
-				if (ii == jj)
 					interband += P * integrate_func(ii, jj) * (*p)[ii][jj];
-				else
+				if (!(ii == jj))
 					interband += P * std::conj(integrate_func(ii, jj) * ((*p)[ii][jj]));
 			}
 		}

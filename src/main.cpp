@@ -15,7 +15,7 @@ main(int argc, char** argv)
 	using real = double; 
 	real k_max = 0.2;
 	real k_min = -0.2;
-	real k_step = 0.02;
+	real k_step = 0.01;
 	real k_size = k_max - k_min;
 	real my_beg = k_size * static_cast<real>(mpi_rank) / static_cast<real>(mpi_size) + k_min + 0.01;
 	real my_end = k_size * static_cast<real>(mpi_rank + 1) / static_cast<real>(mpi_size) + k_min + 0.01;
@@ -30,7 +30,7 @@ main(int argc, char** argv)
 		my_end = k_max;
 	
 	nanoLK<double> nn(N, N, L, L);
-	matrixP<double> pp(nn, my_beg, my_end, k_step, 0.8, 0.9, 10, mpi_comm, mpi_rank, mpi_size);
+	matrixP<double> pp(nn, my_beg, my_end, k_step, 0.79, 0.88, 50, mpi_comm, mpi_rank, mpi_size);
 	pp.run();
 
 //	for (real k = my_beg; k <= my_end; k+=k_step)

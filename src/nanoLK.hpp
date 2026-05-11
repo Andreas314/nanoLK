@@ -70,10 +70,11 @@ public:
 	std::complex<real> integrate_state_and_state(ind, ind, ind, ind) const;
 	std::complex<real> get_value_at_point(int , int , real , real , real) const;
 	std::complex<real> get_derivative_at_point(int , int , int , real , real , real) const;
+	real get_norm(int i) const {return norms[i];}
 	real get_P() const {return std::abs(m_params.p_0 * 
 			static_cast<real>(E_MASS/ H_PLANC));}
 	real get_energy(int i) const {return eigenvalues[i];}
-	std::array<real, 4> get_grid_info() const {return std::array<real, 4>{static_cast<real>(res_x), static_cast<real>(res_y), m_params.s_x, m_params.s_y};}
+	std::array<real, 6> get_grid_info() const {return std::array<real, 6>{static_cast<real>(res_x), static_cast<real>(res_y), m_params.s_x, m_params.s_y, l_x, l_y};}
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
@@ -266,6 +267,9 @@ void nanoLK<T>::integrate_state(int state)
 template<class T>
 void nanoLK<T>::get_valid_indices()
 {
+	valid_indices.clear();
+	conduction_states.clear();
+	valence_states.clear();
 	for (ind ii = 0; ii < size; ii++)
 	{
 		if (eigenvalues[ii] / EV_TO_J < E_max && eigenvalues[ii] / EV_TO_J > E_min && localizations[ii] > localization)
@@ -382,7 +386,6 @@ inline void nanoLK<double>::diagonalize()
 	
 	if (info != 0)
 		throw std::runtime_error("Diagonalization return with info="+std::to_string(info));
-	#pragma omp parallel for
 	for (int ii = 0; ii < size; ii++)
 	{
 		if (eigenvalues[ii] < E_max && eigenvalues[ii] > E_min)
