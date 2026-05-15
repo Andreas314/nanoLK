@@ -78,7 +78,7 @@ public:
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
-	real E_max = 2.5, E_min = -0.7, localization = 0.8;
+	real E_max = 2, E_min = -0.2, localization = 0.9;
 	int res_x = 20, res_y = 20;
 	struct params
 	{
@@ -101,7 +101,7 @@ private:
 		std::complex<real> p_0 =  static_cast<std::complex<real>>(std::sqrt(e_p / 2.0 / E_MASS) * H_PLANC);
 		real s_x = 10e-9 ;
 		real s_y = 10e-9 ;
-		real f_mx = 1 * EV_TO_J;
+		real f_mx = 0.7 * EV_TO_J;
 	};
 
 	const params m_params;
@@ -272,7 +272,12 @@ void nanoLK<T>::get_valid_indices()
 	valence_states.clear();
 	for (ind ii = 0; ii < size; ii++)
 	{
-		if (eigenvalues[ii] / EV_TO_J < E_max && eigenvalues[ii] / EV_TO_J > E_min && localizations[ii] > localization)
+	    bool is_state = localizations[ii] > localization;
+	    bool upper = eigenvalues[ii] / EV_TO_J < E_max;
+	    bool lower_lhhh = eigenvalues[ii] / EV_TO_J > E_min;
+	 //   bool lower_so = (eigenvalues[ii] / EV_TO_J > E_min - m_params.delta_so) &&  (eigenvalues[ii] / EV_TO_J < -m_params.delta_so);
+	    bool lower = lower_lhhh; //|| lower_so;
+		if (is_state && upper && lower)
 			valid_indices.push_back(ii);
 	}
 	std::reverse(valid_indices.begin(), valid_indices.end());

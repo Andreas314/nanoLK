@@ -16,11 +16,11 @@ class matrixP
 {
 	public:
 		using tensor4D = std::array<std::array<std::array<std::array<std::complex<T>, 3>, 3>, 3>, 3>;
-		matrixP(nanoLK<T> &hamiltonian_, T k_z_min_, T k_z_max_, T k_z_step_,T omega_min_, T omega_max_, int n_steps_,  MPI_Comm& mpi_comm_, int mpi_rank_, int mpi_size_):
+		matrixP(nanoLK<T> &hamiltonian_, T k_z_min_, T k_z_max_, int k_z_step_,T omega_min_, T omega_max_, int n_steps_,  MPI_Comm& mpi_comm_, int mpi_rank_, int mpi_size_):
 			hamiltonian(hamiltonian_),
 			k_z_min(k_z_min_),
 			k_z_max(k_z_max_),
-			k_z_step(k_z_step_),
+		    num_step(k_z_step_),
 			mpi_comm(mpi_comm_),
 			mpi_rank(mpi_rank_),
 			mpi_size(mpi_size_),
@@ -59,7 +59,8 @@ class matrixP
 		std::complex<T> i_u{0, 1};
 		
 		T P;
-		T k_z_min, k_z_max, k_z_step;
+		T k_z_min, k_z_max;
+		int num_step;
 		nanoLK<T> &hamiltonian;
 		std::vector<std::vector<std::vector<std::vector<std::complex<T>>>>> functions, derivative_x, derivative_y;
 		std::vector<int> states, valence_states, conduction_states;
@@ -85,8 +86,10 @@ template <>
 void matrixP<double>::run()
 {
 	using T = double;
-	for (T k = k_z_min; k < k_z_max - k_z_step / 2.0; k += k_z_step)
+	T k_z_step =  (k_z_max - k_z_min) / num_step;
+	for (int ii = 0; ii < num_step; ++ii)
 	{
+	    T k = k_z_min + k_z_step * ii;
 		hamiltonian.assemble(k);
 		std::cout << "Diagonalize on " << mpi_rank << " with k_z = " << k  << std::endl;
 		hamiltonian.diagonalize();
@@ -125,7 +128,7 @@ void matrixP<double>::run()
 		);
 		pre_evaluate();
 		std::cout << "Sum on " << mpi_rank << "v = " << valence_states.size() << " c = " << conduction_states.size() << " t = " << states.size() << "\n";
-		get_qi_element(1, 0, 0, 0);
+		get_qi_element(1, 0, 0, 1);
 	}
 	std::cout << mpi_rank << " done!\n";
 	MPI_Barrier(mpi_comm);
@@ -181,9 +184,9 @@ template <class T>
 void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 {
 	int Nv = valence_states.size();
-	std::complex<T> delta = i_u * 1e-3 * EV_TO_J / H_PLANC;
+	std::complex<T> delta = i_u * 1e-3 * EV_TO_J / H_PLANC * 2.5;
 	std::array<std::vector<std::vector<std::complex<T>>>, 3> p;
-	std::complex<T> prefactor = std::pow(EV_TO_J / E_MASS, (T)4) / std::pow(H_PLANC, (T)3) / s_x / s_y  * i_u * static_cast<T>(2.0 /  valence_states.size());
+	std::complex<T> prefactor = std::pow(EV_TO_J / E_MASS, (T)4) / std::pow(H_PLANC, (T)3) / s_x / s_y  * i_u / 3.0;// * static_cast<T>(2.0 /  valence_states.size());
 	for (int a = 0; a < states.size(); a++ )
 	{
 		for (int b = a; b < states.size(); b++ )
@@ -256,7 +259,6 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 						std::complex<T> pd_kv = p[ind_4][k][v];
 						std::complex<T> pd_vl = p[ind_4][v][l];
 						
-						unsigned int counter = 0;
 						std::array<std::complex<T>, 8> nums;
 						nums[0] = pa_kl * pb_lq * pc_qv * pd_vk;
 						nums[1] = pa_kl * pb_lq * pc_qv * pd_vk;
@@ -267,8 +269,9 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 						nums[6] = pa_kq * pc_ql * pd_lv * pb_vk;
 						nums[7] = pa_kv * pc_vl * pd_lq * pb_qk;
 						std::array<std::complex<T>, 8> denoms;
-						for (T & omega: omegas)
+						for (int counter = 0; counter < omegas.size(); counter++ )
 						{
+						    T omega = omegas[counter];
 							denoms[0] = -(-omega + omega_qv + delta)*
 								 (omega_qk - 2 * omega + delta);
 							denoms[1] = -(-omega + omega_vk + delta)*
@@ -295,7 +298,6 @@ void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 							for (int cc = 0; cc < 8; cc++)
 								result += nums[cc] / denoms[cc];
 							QItensor[counter] += result * prefactor;
-							counter++;
 						}
 					}
 				}
@@ -339,11 +341,11 @@ std::complex<T> matrixP<T>::get_momentum(int state_1, int state_2, int direction
 			{
 				result += std::conj(this->functions[state_1][band_a][ny][nx]) *
 						this->functions[state_2][band_b][ny][nx] /
-						std::sqrt(this->hamiltonian.get_norm(states[state_1]) /
+						std::sqrt(this->hamiltonian.get_norm(states[state_1]) *
 						this->hamiltonian.get_norm(states[state_2]));
 			}
 		}
-		result *= (dx * dy) / l_x / l_y;
+		result *= (dx * dy);
 		return result;
 	};
 
@@ -359,16 +361,16 @@ std::complex<T> matrixP<T>::get_momentum(int state_1, int state_2, int direction
 				if (direction == 0)
 					result += i_u * std::conj(this->functions[state_1][band_a][ny][nx]) *
 						this->derivative_x[state_2][band_b][ny][nx] /
-					std::sqrt(this->hamiltonian.get_norm(states[state_1]) /
+					std::sqrt(this->hamiltonian.get_norm(states[state_1]) *
 						this->hamiltonian.get_norm(states[state_2]));
 				else
 					result += std::conj(this->functions[state_1][band_a][ny][nx]) *
 						this->derivative_y[state_2][band_b][ny][nx] /
-					std::sqrt(this->hamiltonian.get_norm(states[state_1]) /
+					std::sqrt(this->hamiltonian.get_norm(states[state_1]) *
 						this->hamiltonian.get_norm(states[state_2]));
 			}
 		}
-		result *= (dx * dy) / l_x / l_y;
+		result *= (dx * dy);
 		return result;
 	};
 
