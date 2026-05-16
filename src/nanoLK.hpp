@@ -78,7 +78,7 @@ public:
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
-	real E_max = 2, E_min = -0.2, localization = 0.9;
+	real E_max = 0.3, E_min = -0.2, localization = 0.85;
 	int res_x = 20, res_y = 20;
 	struct params
 	{
@@ -101,7 +101,7 @@ private:
 		std::complex<real> p_0 =  static_cast<std::complex<real>>(std::sqrt(e_p / 2.0 / E_MASS) * H_PLANC);
 		real s_x = 10e-9 ;
 		real s_y = 10e-9 ;
-		real f_mx = 0.7 * EV_TO_J;
+		real f_mx = 0.4 * EV_TO_J;
 	};
 
 	const params m_params;
@@ -270,11 +270,27 @@ void nanoLK<T>::get_valid_indices()
 	valid_indices.clear();
 	conduction_states.clear();
 	valence_states.clear();
+	T lowest = 0;
+	T highest = 0;
+	for (int ii = 0; ii < size; ii++)
+	{
+		bool is_state = localizations[ii] > localization;
+		if (is_state)
+		{
+			if (eigenvalues[ii] > 0)
+			{
+				lowest = eigenvalues[ii] / EV_TO_J;
+				highest = eigenvalues[ii - 1] / EV_TO_J;
+				break;
+			}
+		}
+
+	}
 	for (ind ii = 0; ii < size; ii++)
 	{
 	    bool is_state = localizations[ii] > localization;
-	    bool upper = eigenvalues[ii] / EV_TO_J < E_max;
-	    bool lower_lhhh = eigenvalues[ii] / EV_TO_J > E_min;
+	    bool upper = eigenvalues[ii] / EV_TO_J < (lowest + E_max);
+	    bool lower_lhhh = eigenvalues[ii] / EV_TO_J > (highest + E_min);
 	 //   bool lower_so = (eigenvalues[ii] / EV_TO_J > E_min - m_params.delta_so) &&  (eigenvalues[ii] / EV_TO_J < -m_params.delta_so);
 	    bool lower = lower_lhhh; //|| lower_so;
 		if (is_state && upper && lower)
@@ -315,7 +331,7 @@ void nanoLK<T>::write_functions(real dx, real dy, int max, bool write) const
 			output << "x y psi\n";
 			for (int ii = 0; ii < size; ii++)
 			{
-				coeffs[ii] = hamiltonian[lim * size + ii];
+				coeffs[ii] = hamiltonian[lim  * size + ii];
 		
 			}
 			for (float x = -m_params.s_x / 2.0  ; x <= m_params.s_x / 2.0 + dx; x+=dx)
@@ -476,8 +492,8 @@ inline std::complex<T> nanoLK<T>::h0(vec k, vec q, std::complex<real> f, real f_
 	T sigma = m_params.s_x / 10.0;
 	std::complex<real> result = 0;
 	if (k[0] == q[0] && k[1] == q[1])
-		result = f_md * weight;
-	result += static_cast<real>(1.0 / l_x / l_y) * xi_mx(k[0] - q[0], k[1] - q[1]) * (f - f_md * weight);
+		result = (f + f_md * weight);
+	result -= static_cast<real>(1.0 / l_x / l_y) * xi_mx(k[0] - q[0], k[1] - q[1]) * f_md * weight;
 	return result;
 }
 
@@ -501,7 +517,7 @@ template <class T>
 inline std::complex<T> nanoLK<T>::element_o(real k_z, vec k, vec q) const
 {
 	std::complex<real> f = pre_fact * m_params.gamma_c;
-	return h0(k, q, f  *  k_z * k_z, m_params.f_mx, 1) + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1 ,1, k, q, f, 1);
+	return h0(k, q, f  *  k_z * k_z, m_params.f_mx , 1) + h2(0, 0, 0, 0, k, q, f, 1) + h2(1, 1, 1 ,1, k, q, f, 1);
 }
 
 template <class T>
@@ -517,7 +533,7 @@ inline std::complex<T> nanoLK<T>::element_q(real k_z, vec k, vec q, int weight) 
 	int index = (weight == -1) ? -1 : 1;
 	//weight *= index;
 	auto f = pre_fact * m_params.gamma_2;
-	return  h0(k, q, -f * static_cast<std::complex<real>>(2.0) *  k_z * k_z, m_params.f_mx, weight)  + h2(0, 0, 0, 0, k, q, f, weight) + h2(1, 1, 1, 1, k, q, f, weight);
+	return  h0(k, q, -f * static_cast<std::complex<real>>(2.0) *  k_z * k_z, m_params.f_mx , weight)  + h2(0, 0, 0, 0, k, q, f, weight) + h2(1, 1, 1, 1, k, q, f, weight);
 }
 
 template <class T>
