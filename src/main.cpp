@@ -13,8 +13,8 @@ main(int argc, char** argv)
         MPI_Comm_rank(mpi_comm, &mpi_rank);
 	//actual code
 	using real = double; 
-	real k_max = 0.2;
-	real k_min = -0.2;
+	real k_max = 0.1;
+	real k_min = -0.1;
 	int num_steps_per_proc = std::atoi(argv[3]);
 	int num_steps = num_steps_per_proc * mpi_size;
 	real k_size = (k_max - k_min) / mpi_size;
@@ -25,7 +25,7 @@ main(int argc, char** argv)
 	if (mpi_rank == 0 )
 		std::cout << "Setting up simulation with L = " << L * 1e9 << " nm and N = " << N << "\n";
 	nanoLK<double> nn(N, N, L, L);
-	matrixP<double> pp(nn, my_beg, my_end, num_steps_per_proc, 0.79, 0.88, 50, mpi_comm, mpi_rank, mpi_size);
+	matrixP<double> pp(nn, my_beg, my_end, num_steps_per_proc, 0.79, 0.88, 100, mpi_comm, mpi_rank, mpi_size);
 	pp.run();
 
 //	for (real k = my_beg; k <= my_end; k+=k_step)

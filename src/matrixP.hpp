@@ -66,6 +66,7 @@ class matrixP
 		std::vector<int> states, valence_states, conduction_states;
 		void pre_evaluate();
 		std::complex<T> get_momentum(int, int, int);
+		std::complex<T> get_momentum_analytically(int, int, int);
 		void get_qi_element(int, int, int, int);
 		constexpr static int n_bands = 8;
 		int res_x, res_y, n_steps;
@@ -91,7 +92,7 @@ void matrixP<double>::run()
 	{
 	    T k = k_z_min + k_z_step * ii;
 		hamiltonian.assemble(k);
-		std::cout << "Diagonalize on " << mpi_rank << " with k_z = " << k  << std::endl;
+		//std::cout << "Diagonalize on " << mpi_rank << " with k_z = " << k  << std::endl;
 		hamiltonian.diagonalize();
 		states = hamiltonian.get_indices();
 		valence_states = hamiltonian.get_valence_states();
@@ -127,10 +128,10 @@ void matrixP<double>::run()
 		    )
 		);
 		pre_evaluate();
-		std::cout << "Sum on " << mpi_rank << "v = " << valence_states.size() << " c = " << conduction_states.size() << " t = " << states.size() << "\n";
+		//std::cout << "Sum on " << mpi_rank << "v = " << valence_states.size() << " c = " << conduction_states.size() << " t = " << states.size() << "\n";
 		get_qi_element(1, 0, 0, 1);
 	}
-	std::cout << mpi_rank << " done!\n";
+//	std::cout << mpi_rank << " done!\n";
 	MPI_Barrier(mpi_comm);
 
 	if (mpi_rank == 0)
@@ -183,133 +184,95 @@ void matrixP<T>::pre_evaluate()
 template <class T>
 void matrixP<T>::get_qi_element(int ind_1, int ind_2, int ind_3, int ind_4)
 {
-	int Nv = valence_states.size();
-	std::complex<T> delta = i_u * 1e-3 * EV_TO_J / H_PLANC * 2.5;
-	std::array<std::vector<std::vector<std::complex<T>>>, 3> p;
-	std::complex<T> prefactor = std::pow(EV_TO_J / E_MASS, (T)4) / std::pow(H_PLANC, (T)3) / s_x / s_y  * i_u / 3.0;// * static_cast<T>(2.0 /  valence_states.size());
-	for (int a = 0; a < states.size(); a++ )
-	{
-		for (int b = a; b < states.size(); b++ )
-		{
-			for (int ind = 0; ind < 3; ind++ )
-			{
-				if (a == 0 && b == 0)
- 				p[ind].assign(states.size(),
-		            std::vector<std::complex<T>>(states.size()));
-				std::complex<T> res = get_momentum(b, a, ind);
-				p[ind][b][a] = res;
-				p[ind][a][b] = std::conj(res);
-			}
-		}
-	}
-						
-		for (int k = 0; k < states.size(); k++ )
-		{
-			int ind_k = states[k];
-			T omega_k = hamiltonian.get_energy(ind_k) / H_PLANC;
-			for (int l = 0; l < states.size(); l++ )
-			{
-				int ind_l = states[l];
-				std::complex<T> pa_kl = p[ind_1][k][l];
-				std::complex<T> pd_lk = p[ind_4][l][k];
-				for (int q = 0; q < states.size(); q++ )
-				{
-					int ind_q = states[q];
-					std::complex<T> pa_kq = p[ind_1][k][q];
-					std::complex<T> pb_lq = p[ind_2][l][q];
-					std::complex<T> pb_kq = p[ind_2][k][q];
-					std::complex<T> pc_ql = p[ind_3][q][l];
-					std::complex<T> pd_ql = p[ind_4][q][l];
-					std::complex<T> pd_qk = p[ind_4][q][k];
-					
-					std::complex<T> pa_qk = p[ind_1][q][k];
-					std::complex<T> pb_ql = p[ind_2][q][l];
-					std::complex<T> pb_qk = p[ind_2][q][k];
-					std::complex<T> pc_lq = p[ind_3][l][q];
-					std::complex<T> pd_lq = p[ind_4][l][q];
-					std::complex<T> pd_kq = p[ind_4][k][q];
-					T omega_qk = (hamiltonian.get_energy(ind_q) - hamiltonian.get_energy(ind_k)) / H_PLANC;
-					T omega_lq = (hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_q))/ H_PLANC;
-					for (auto & v : valence_states)
-					{
-						int ind_v = states[v];
-						T omega_qv = (hamiltonian.get_energy(ind_q) - hamiltonian.get_energy(ind_v)) / H_PLANC;
-						T omega_lv = (hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_v))/ H_PLANC;
-						T omega_vk = (hamiltonian.get_energy(ind_v) - hamiltonian.get_energy(ind_k))/ H_PLANC;
-						
-						T omega_vq = -(hamiltonian.get_energy(ind_q) - hamiltonian.get_energy(ind_v)) / H_PLANC;
-						T omega_vl = -(hamiltonian.get_energy(ind_l) - hamiltonian.get_energy(ind_v))/ H_PLANC;
-						T omega_kv = -(hamiltonian.get_energy(ind_v) - hamiltonian.get_energy(ind_k))/ H_PLANC;
+    std::complex<T> delta = i_u * 2.5e-3 * EV_TO_J / H_PLANC;
+    std::complex<T> prefactor = std::pow(EV_TO_J / E_MASS, (T)4) 
+                              / std::pow(H_PLANC, (T)3) 
+                              / s_x / s_y * i_u * 2.0 / (T)valence_states.size() ;
 
-						std::complex<T> pa_vk = p[ind_1][v][k];
-						std::complex<T> pb_qv = p[ind_2][q][v];
-						std::complex<T> pb_vk = p[ind_2][v][k];
-						std::complex<T> pc_lv = p[ind_3][l][v];
-						std::complex<T> pc_qv = p[ind_3][q][v];
-						std::complex<T> pd_vq = p[ind_4][v][q];
-						std::complex<T> pd_vk = p[ind_4][v][k];
-						std::complex<T> pd_lv = p[ind_4][l][v];
-						
-						std::complex<T> pa_kv = p[ind_1][k][v];
-						std::complex<T> pb_vq = p[ind_2][v][q];
-						std::complex<T> pb_kv = p[ind_2][k][v];
-						std::complex<T> pc_vl = p[ind_3][v][l];
-						std::complex<T> pc_vq = p[ind_3][v][q];
-						std::complex<T> pd_qv = p[ind_4][q][v];
-						std::complex<T> pd_kv = p[ind_4][k][v];
-						std::complex<T> pd_vl = p[ind_4][v][l];
-						
-						std::array<std::complex<T>, 8> nums;
-						nums[0] = pa_kl * pb_lq * pc_qv * pd_vk;
-						nums[1] = pa_kl * pb_lq * pc_qv * pd_vk;
-						nums[2] = pa_kl * pc_lv * pd_vq * pb_qk;
-						nums[3] = pa_kl * pc_lv * pd_vq * pb_qk;
-						nums[4] = pa_vk * pb_kq * pc_ql * pd_lv;
-						nums[5] = pa_kq * pb_qv * pc_vl * pd_lk;
-						nums[6] = pa_kq * pc_ql * pd_lv * pb_vk;
-						nums[7] = pa_kv * pc_vl * pd_lq * pb_qk;
-						std::array<std::complex<T>, 8> denoms;
-						for (int counter = 0; counter < omegas.size(); counter++ )
-						{
-						    T omega = omegas[counter];
-							denoms[0] = -(-omega + omega_qv + delta)*
-								 (omega_qk - 2 * omega + delta);
-							denoms[1] = -(-omega + omega_vk + delta)*
-								 (omega_qk - 2 * omega + delta);
-							
-							denoms[2] = (-omega + omega_lv + delta) *
-								 (omega_lq - 2 * omega + delta);
-							
-							denoms[3] = (-omega + omega_vq + delta) *
-								 (omega_lq - 2 * omega + delta);
-							
-							denoms[4] = (-omega + omega_lv + delta) *
-								 (omega_qv - 2 * omega + delta);
-							
-							denoms[5] = (-omega + omega_vl + delta) *
-								 (omega_vq - 2 * omega + delta);
-							
-							denoms[6] = -(-omega + omega_lv + delta)*
-								 (omega_qv - 2 * omega + delta);
-							
-							denoms[7] = -(-omega + omega_vl + delta)*
-								 (omega_vq - 2 * omega + delta);
-							std::complex<T> result = 0;
-							for (int cc = 0; cc < 8; cc++)
-								result += nums[cc] / denoms[cc];
-							QItensor[counter] += result * prefactor;
-						}
-					}
-				}
-			}
-		}
-		for (int counter = 0; counter < omegas.size(); counter++)
-		{
-			QItensor[counter] /= std::pow(omegas[counter], (T)3);
-		}
+    // Build momentum matrices first
+    std::array<std::vector<std::vector<std::complex<T>>>, 3> p;
+    for (int ind = 0; ind < 3; ind++)
+        p[ind].assign(states.size(), 
+                      std::vector<std::complex<T>>(states.size(), 0));
+    for (int a = 0; a < states.size(); a++)
+    {
+        for (int b = a; b < states.size(); b++)
+        {
+            for (int ind = 0; ind < 3; ind++)
+            {
+                std::complex<T> res = get_momentum(b, a, ind);
+                p[ind][b][a] = res;
+                p[ind][a][b] = std::conj(res);
+            }
+        }
+        }
 
+    // Build correct conduction/valence lookup by state index
+    // conduction_states and valence_states contain indices INTO states[]
+    std::vector<bool> is_cond(states.size(), false);
+    std::vector<bool> is_val(states.size(), false);
+    for (int idx : conduction_states) is_cond[idx] = true;
+    for (int idx : valence_states)    is_val[idx]  = true;
+
+    int N = states.size();
+
+    for (int k = 0; k < N; k++)
+    for (int l = 0; l < N; l++)
+    for (int q = 0; q < N; q++)
+    for (int v = 0; v < N; v++)
+    {
+        if (!is_val[v]) continue;  // v must be valence
+
+        T E_k = hamiltonian.get_energy(states[k]);
+        T E_l = hamiltonian.get_energy(states[l]);
+        T E_q = hamiltonian.get_energy(states[q]);
+        T E_v = hamiltonian.get_energy(states[v]);
+
+        // All transition frequencies in rad/s
+        T w_qv = (E_q - E_v) / H_PLANC;
+        T w_lv = (E_l - E_v) / H_PLANC;
+        T w_vk = (E_v - E_k) / H_PLANC;
+        T w_qk = (E_q - E_k) / H_PLANC;
+        T w_lq = (E_l - E_q) / H_PLANC;
+        T w_vq = -w_qv;
+        T w_vl = -w_lv;
+        T w_kv = -w_vk;
+
+        // Numerators exactly from formula (3.5)
+        std::array<std::complex<T>, 8> nums;
+        nums[0] = p[ind_1][k][l] * p[ind_2][l][q] * p[ind_3][q][v] * p[ind_4][v][k];
+        nums[1] = p[ind_1][k][l] * p[ind_2][l][q] * p[ind_3][q][v] * p[ind_4][v][k];
+        nums[2] = p[ind_1][k][l] * p[ind_3][l][v] * p[ind_4][v][q] * p[ind_2][q][k];
+        nums[3] = p[ind_1][k][l] * p[ind_3][l][v] * p[ind_4][v][q] * p[ind_2][q][k];
+        nums[4] = p[ind_1][v][k] * p[ind_2][k][q] * p[ind_3][q][l] * p[ind_4][l][v];
+        nums[5] = p[ind_1][k][q] * p[ind_2][q][v] * p[ind_3][v][l] * p[ind_4][l][k];
+        nums[6] = p[ind_1][k][q] * p[ind_3][q][l] * p[ind_4][l][v] * p[ind_2][v][k];
+        nums[7] = p[ind_1][k][v] * p[ind_3][v][l] * p[ind_4][l][q] * p[ind_2][q][k];
+       // for (int ii = 0; ii < 8; ii++)
+        //nums[ii] = 1;
+        for (int step = 0; step < n_steps; step++)
+        {
+            T w = omegas[step];
+
+            // Denominators exactly from formula (3.5)
+            std::array<std::complex<T>, 8> denoms;
+            denoms[0] = -(-w + w_qv + delta) * (w_qk - 2*w + delta);
+            denoms[1] = -(-w + w_vk + delta) * (w_qk - 2*w + delta);
+            denoms[2] =  (-w + w_lv + delta) * (w_lq - 2*w + delta);
+            denoms[3] =  (-w + w_vq + delta) * (w_lq - 2*w + delta);
+            denoms[4] =  (-w + w_lv + delta) * (w_qv - 2*w + delta);
+            denoms[5] =  (-w + w_vl + delta) * (w_vq - 2*w + delta);
+            denoms[6] = -(-w + w_lv + delta) * (w_qv - 2*w + delta);
+            denoms[7] = -(-w + w_vl + delta) * (w_vq - 2*w + delta);
+
+            std::complex<T> result = 0;
+            for (int cc = 0; cc < 8; cc++)
+                result += nums[cc] / denoms[cc];
+
+            QItensor[step] += result * prefactor / std::pow(w, (T)3);
+        }
+    }
 }
-
 
 
 
@@ -373,15 +336,14 @@ std::complex<T> matrixP<T>::get_momentum(int state_1, int state_2, int direction
 		result *= (dx * dy);
 		return result;
 	};
-
-
+	
 	std::complex<T> intraband= 0.0;
 	std::complex<T> interband= 0.0;
 	std::array<std::array<std::array<std::complex<T>, n_bands>, n_bands>*, 3> ps{&p_x, &p_y, &p_z};
 	auto p = ps[direction];
 	for (int ii = 0; ii < n_bands; ii++)
 	{
-		if (state_1 != state_2)
+		//if (state_1 != state_2)
 			intraband += -i_u * static_cast<T>(H_PLANC)*integrate_der(ii, ii);
 		for (int jj = ii; jj < n_bands; jj++)
 		{

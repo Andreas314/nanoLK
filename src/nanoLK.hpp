@@ -78,8 +78,8 @@ public:
 
 private:
 	constexpr static std::complex<real> i_u = std::complex<real>(0.0, 1.0);
-	real E_max = 0.3, E_min = -0.2, localization = 0.85;
-	int res_x = 20, res_y = 20;
+	real E_max = 0.13, E_min = -0.05, localization = 0.85;
+	int res_x = 50, res_y = 50;
 	struct params
 	{
 		real gamma_l_1 = 6.98 ;
@@ -101,7 +101,7 @@ private:
 		std::complex<real> p_0 =  static_cast<std::complex<real>>(std::sqrt(e_p / 2.0 / E_MASS) * H_PLANC);
 		real s_x = 10e-9 ;
 		real s_y = 10e-9 ;
-		real f_mx = 0.4 * EV_TO_J;
+		real f_mx = 0.2 * EV_TO_J;
 	};
 
 	const params m_params;
