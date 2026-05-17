@@ -22,10 +22,11 @@ main(int argc, char** argv)
 	real my_end = k_min + (mpi_rank + 1) * k_size;
 	double L = std::atoi(argv[2]) * 1e-9;
 	int N = std::atoi(argv[1]);
+	double size = std::atoi(argv[4]) * 1e-9;
 	if (mpi_rank == 0 )
-		std::cout << "Setting up simulation with L = " << L * 1e9 << " nm and N = " << N << "\n";
-	nanoLK<double> nn(N, N, L, L);
-	matrixP<double> pp(nn, my_beg, my_end, num_steps_per_proc, 0.79, 0.88, 100, mpi_comm, mpi_rank, mpi_size);
+		std::cout << "Setting up simulation with L = " << L * 1e9 << " nm,  N = " << N << " and S = " << size * 1e9 << " nm" "\n";
+	nanoLK<double> nn(N, N, L, L, size, size);
+	matrixP<double> pp(nn, my_beg, my_end, num_steps_per_proc, 0.75, 0.9, 150, mpi_comm, mpi_rank, mpi_size);
 	pp.run();
 
 //	for (real k = my_beg; k <= my_end; k+=k_step)

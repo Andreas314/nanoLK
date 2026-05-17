@@ -92,7 +92,7 @@ void matrixP<double>::run()
 	{
 	    T k = k_z_min + k_z_step * ii;
 		hamiltonian.assemble(k);
-		//std::cout << "Diagonalize on " << mpi_rank << " with k_z = " << k  << std::endl;
+		std::cout << "Diagonalize on " << mpi_rank << " with k_z = " << k  << std::endl;
 		hamiltonian.diagonalize();
 		states = hamiltonian.get_indices();
 		valence_states = hamiltonian.get_valence_states();
@@ -128,10 +128,10 @@ void matrixP<double>::run()
 		    )
 		);
 		pre_evaluate();
-		//std::cout << "Sum on " << mpi_rank << "v = " << valence_states.size() << " c = " << conduction_states.size() << " t = " << states.size() << "\n";
+		std::cout << "Sum on " << mpi_rank << "v = " << valence_states.size() << " c = " << conduction_states.size() << " t = " << states.size() << "\n";
 		get_qi_element(1, 0, 0, 1);
 	}
-//	std::cout << mpi_rank << " done!\n";
+	std::cout << mpi_rank << " done!\n";
 	MPI_Barrier(mpi_comm);
 
 	if (mpi_rank == 0)

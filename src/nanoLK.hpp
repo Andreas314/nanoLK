@@ -39,11 +39,13 @@ public:
 	using real = T;
 	using ind = int;
 	using vec = std::array<ind, 2>;
-	nanoLK(ind n_x_, ind n_y_, real l_x_, real l_y_):
+	nanoLK(ind n_x_, ind n_y_, real l_x_, real l_y_, real s_x_, real s_y_):
 		l_x(l_x_),
 		l_y(l_y_),
 		n_x(n_x_),
-		n_y(n_y_)
+		n_y(n_y_),
+		s_x(s_x_),
+		s_y(s_y_)
 		{
 			size = n_bands * (2 * n_x  + 1) * (2 * n_y + 1);
 			hamiltonian.resize( ( size * size ));
@@ -52,6 +54,8 @@ public:
 			localizations.resize(size);
 			G_x = 2.0 * M_PI / l_x;
 			G_y = 2.0 * M_PI / l_y;
+			m_params.s_x = s_x;
+			m_params.s_y = s_y;
 		};
 	
 	void set_E_max(real E){E_max = E;}
@@ -101,14 +105,14 @@ private:
 		std::complex<real> p_0 =  static_cast<std::complex<real>>(std::sqrt(e_p / 2.0 / E_MASS) * H_PLANC);
 		real s_x = 10e-9 ;
 		real s_y = 10e-9 ;
-		real f_mx = 0.2 * EV_TO_J;
+		real f_mx = 0.23 * EV_TO_J;
 	};
 
-	const params m_params;
+	params m_params;
 	constexpr static ind n_bands = 8;
 	constexpr static real pre_fact = (H_PLANC * H_PLANC / 2.0 / E_MASS);
 	ind n_x, n_y, size;
-	real l_x, l_y, G_x, G_y;
+	real l_x, l_y, G_x, G_y, s_x, s_y;
 	std::vector<std::complex<real>> hamiltonian;
 	std::vector<real> eigenvalues;
 	std::vector<int> valid_indices, valence_states, conduction_states;
